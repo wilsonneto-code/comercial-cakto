@@ -96,9 +96,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchingRef = useRef(false);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    if (!email.toLowerCase().endsWith('@cakto.com.br')) {
-      return { data: null, error: 'Email ou senha inválidos.' };
-    }
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) return { data: null, error: error.message };
@@ -109,9 +106,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signUp = useCallback(async (name: string, email: string, password: string) => {
-    if (!email.toLowerCase().endsWith('@cakto.com.br')) {
-      return { error: 'Não foi possível criar a conta. Entre em contato com o administrador.' };
-    }
     const { error } = await supabase.auth.signUp({
       email,
       password,
