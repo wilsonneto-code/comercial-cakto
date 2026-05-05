@@ -349,8 +349,9 @@ function AgendaContent() {
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, 8);
 
+  const currentPeriod = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
   const closerStats = closers.map(u => {
-    const uCalls = calls.filter(c => c.responsibleId === u.id);
+    const uCalls = calls.filter(c => c.responsibleId === u.id && c.date.startsWith(currentPeriod));
     const done   = uCalls.filter(c => c.status === 'Realizada').length;
     return { id: u.id, name: u.name, total: uCalls.length, done, rate: uCalls.length ? Math.round((done / uCalls.length) * 100) : 0 };
   });
@@ -626,7 +627,7 @@ function AgendaContent() {
         {/* ── Performance por Closer ───────────────────────────────────────────── */}
         {closerStats.length > 0 && (
           <div style={{ marginTop: 20, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
-            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 16 }}>Performance por Closer</div>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 16 }}>Performance por Closer — {MONTHS[today.getMonth()]} {today.getFullYear()}</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
               {closerStats.map(c => {
                 const cc = closerColor(c.name);

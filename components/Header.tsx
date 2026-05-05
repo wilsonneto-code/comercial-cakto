@@ -12,8 +12,9 @@ const NAV_ITEMS = [
   { key: 'ranking',      label: 'Ranking' },
   { key: 'formularios',  label: 'Formulários' },
   { key: 'estoque',      label: 'Estoque' },
-  { key: 'agenda',       label: 'Agenda' },
-  { key: 'dashboards',   label: 'Dashboards' },
+  { key: 'agenda',           label: 'Agenda' },
+  { key: 'relatorio-calls',  label: 'Relatório de Calls' },
+  { key: 'dashboards',       label: 'Dashboards' },
 ];
 
 export function Header() {

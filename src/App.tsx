@@ -8,6 +8,7 @@ import Responsaveis from './pages/Responsaveis'
 import Formularios from './pages/Formularios'
 import Estoque from './pages/Estoque'
 import Agenda from './pages/Agenda'
+import RelatoriosCalls from './pages/RelatoriosCalls'
 import Dashboards from './pages/Dashboards'
 import Configuracoes from './pages/Configuracoes'
 import DashboardTime from './pages/DashboardTime'
@@ -63,6 +64,7 @@ export default function App() {
       <Route path="/formularios" element={<ProtectedRoute><Formularios /></ProtectedRoute>} />
       <Route path="/estoque" element={<ProtectedRoute><Estoque /></ProtectedRoute>} />
       <Route path="/agenda" element={<ProtectedRoute><Agenda /></ProtectedRoute>} />
+      <Route path="/relatorio-calls" element={<ProtectedRoute><RelatoriosCalls /></ProtectedRoute>} />
       <Route path="/dashboards" element={<ProtectedRoute><Dashboards /></ProtectedRoute>} />
       <Route path="/dashboard/time/:timeId" element={<ProtectedRoute><DashboardTime /></ProtectedRoute>} />
       <Route path="/dashboard/lifetime" element={<ProtectedRoute><DashboardLifetime /></ProtectedRoute>} />
