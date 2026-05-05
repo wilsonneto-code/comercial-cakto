@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { ChevronLeft, ChevronRight, Plus, Phone, Calendar, CheckCircle, XCircle, Clock, Loader2, ExternalLink, Video, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Plus, Phone, Calendar, CheckCircle, XCircle, Clock, Loader2, ExternalLink, Video, Trash2 } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { Header } from '@/components/Header';
 import { Button } from '@/components/ui/Button';
@@ -71,6 +71,8 @@ function formatInviteText(call: CallItem): string {
   return text;
 }
 
+type HistoryCall = CallItem & { period: string };
+
 const EMPTY_FORM = { title: '', date: '', time: '', endTime: '', responsibleId: '', status: 'Agendada', notes: '', clientEmail: '' };
 
 export default function AgendaPage() {
@@ -105,37 +107,45 @@ function AgendaContent() {
   const [form, setForm]               = useState({ ...EMPTY_FORM });
   const [closerModal, setCloserModal] = useState<{ id: string; name: string } | null>(null);
 
+  const [history, setHistory]               = useState<HistoryCall[]>([]);
+  const [expandedPeriods, setExpandedPeriods] = useState<Set<string>>(new Set());
+
   // ── Fetch ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     async function load() {
       setIsLoading(true);
-      const [{ data: dbCalls, error: ce }, { data: dbUsers, error: ue }] = await Promise.all([
+      const [{ data: dbCalls, error: ce }, { data: dbUsers, error: ue }, { data: dbHistory }] = await Promise.all([
         supabase.from('calls')
           .select('id,title,date,time,end_time,responsible,status,notes,client_email,google_event_id,meet_link')
           .order('date').order('time'),
         supabase.from('users').select('id,name,role').order('name'),
+        supabase.from('calls_history')
+          .select('id,title,date,time,end_time,responsible,status,notes,client_email,google_event_id,meet_link,period')
+          .order('period', { ascending: false }).order('date').order('time'),
       ]);
       if (ce) toast(ce.message, 'error');
       if (ue) toast(ue.message, 'error');
 
       const userList = (dbUsers || []) as DbUser[];
       setUsers(userList);
-      if (dbCalls) {
-        setCalls((dbCalls as any[]).map(c => ({
-          id:              c.id,
-          title:           c.title,
-          date:            c.date,
-          time:            (c.time as string)?.slice(0, 5) || '',
-          endTime:         (c.end_time as string)?.slice(0, 5) || '',
-          responsibleId:   c.responsible,
-          responsible:     userList.find(u => u.id === c.responsible)?.name || '?',
-          status:          c.status,
-          notes:           c.notes ?? '',
-          clientEmail:     c.client_email ?? '',
-          google_event_id: c.google_event_id ?? '',
-          meet_link:       c.meet_link ?? '',
-        })));
-      }
+      const mapCall = (c: any, period?: string) => ({
+        id:              c.id,
+        title:           c.title,
+        date:            c.date,
+        time:            (c.time as string)?.slice(0, 5) || '',
+        endTime:         (c.end_time as string)?.slice(0, 5) || '',
+        responsibleId:   c.responsible,
+        responsible:     userList.find(u => u.id === c.responsible)?.name || '?',
+        status:          c.status,
+        notes:           c.notes ?? '',
+        clientEmail:     c.client_email ?? '',
+        google_event_id: c.google_event_id ?? '',
+        meet_link:       c.meet_link ?? '',
+        ...(period !== undefined ? { period } : {}),
+      });
+
+      if (dbCalls) setCalls((dbCalls as any[]).map(c => mapCall(c)));
+      if (dbHistory) setHistory((dbHistory as any[]).map(c => mapCall(c, c.period) as HistoryCall));
       setIsLoading(false);
     }
     load();
@@ -646,6 +656,90 @@ function AgendaContent() {
             </div>
           </div>
         )}
+
+        {/* ── Histórico de Calls ────────────────────────────────────────────── */}
+        {history.length > 0 && (() => {
+          const periods = [...new Set(history.map(c => c.period))].sort((a, b) => b.localeCompare(a));
+          return (
+            <div style={{ marginTop: 28 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 14 }}>Histórico de Meses Anteriores</h2>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {periods.map(period => {
+                  const [py, pm] = period.split('-').map(Number);
+                  const label = `${MONTHS[pm - 1]} ${py}`;
+                  const pCalls = history.filter(c => c.period === period);
+                  const isOpen = expandedPeriods.has(period);
+                  const stats = [
+                    { label: 'Agendadas',  value: pCalls.filter(c => c.status === 'Agendada').length,  color: 'var(--action)' },
+                    { label: 'Realizadas', value: pCalls.filter(c => c.status === 'Realizada').length, color: 'var(--green)'  },
+                    { label: 'Canceladas', value: pCalls.filter(c => c.status === 'Cancelada').length, color: 'var(--red)'    },
+                    { label: 'No-show',    value: pCalls.filter(c => c.status === 'No-show').length,   color: 'var(--orange)' },
+                  ];
+                  return (
+                    <div key={period} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+                      <button
+                        onClick={() => setExpandedPeriods(prev => {
+                          const next = new Set(prev);
+                          next.has(period) ? next.delete(period) : next.add(period);
+                          return next;
+                        })}
+                        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          padding: '14px 20px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text)', fontFamily: 'inherit' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                          <span style={{ fontWeight: 700, fontSize: 15 }}>{label}</span>
+                          <span style={{ fontSize: 12, color: 'var(--text2)' }}>{pCalls.length} call{pCalls.length !== 1 ? 's' : ''}</span>
+                          <div style={{ display: 'flex', gap: 10 }}>
+                            {stats.map(s => s.value > 0 && (
+                              <span key={s.label} style={{ fontSize: 12, color: s.color, fontWeight: 600 }}>
+                                {s.value} {s.label.toLowerCase()}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <ChevronDown size={16} style={{ color: 'var(--text2)', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
+                      </button>
+                      {isOpen && (
+                        <div style={{ borderTop: '1px solid var(--border)', overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                            <thead>
+                              <tr>
+                                {['Data', 'Hora', 'Título', 'Responsável', 'Status'].map(h => (
+                                  <th key={h} style={{ padding: '8px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700,
+                                    color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em',
+                                    borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', background: 'var(--bg-card2)' }}>{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {pCalls.sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time)).map((c, i) => (
+                                <tr key={c.id} style={{ background: i % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-card2)' }}>
+                                  <td style={{ padding: '9px 16px', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>
+                                    {new Date(c.date + 'T12:00:00').toLocaleDateString('pt-BR')}
+                                  </td>
+                                  <td style={{ padding: '9px 16px', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{c.time}</td>
+                                  <td style={{ padding: '9px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>{c.title}</td>
+                                  <td style={{ padding: '9px 16px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{c.responsible}</td>
+                                  <td style={{ padding: '9px 16px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                                    <span style={{
+                                      background: `color-mix(in srgb, ${CALL_STATUS_COLORS[c.status] || 'var(--text2)'} 15%, var(--bg-card2))`,
+                                      color: CALL_STATUS_COLORS[c.status] || 'var(--text2)',
+                                      border: `1px solid ${CALL_STATUS_COLORS[c.status] || 'var(--border)'}`,
+                                      borderRadius: 20, padding: '2px 9px', fontSize: 11, fontWeight: 700,
+                                    }}>{c.status}</span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ── Modal: Nova / Editar Call ──────────────────────────────────────── */}
         <Modal open={modal} onClose={() => setModal(false)} title={editCall ? 'Editar Call' : 'Nova Call'}>
