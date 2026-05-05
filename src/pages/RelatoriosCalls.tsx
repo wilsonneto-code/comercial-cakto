@@ -57,9 +57,9 @@ function RelatoriosContent() {
   const today = new Date()
   const currentPeriod = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
 
-  const [isLoading, setIsLoading]         = useState(true)
-  const [periods, setPeriods]             = useState<PeriodStats[]>([])
-  const [expandedPeriods, setExpandedPeriods] = useState<Set<string>>(new Set())
+  const [isLoading, setIsLoading]             = useState(true)
+  const [periods, setPeriods]                 = useState<PeriodStats[]>([])
+  const [selectedPeriod, setSelectedPeriod]   = useState<string>(currentPeriod)
   const [expandedClosers, setExpandedClosers] = useState<Set<string>>(new Set())
 
   useEffect(() => {
@@ -113,15 +113,11 @@ function RelatoriosContent() {
       }
 
       setPeriods(result)
-      if (result.length > 0) setExpandedPeriods(new Set([result[0].period]))
       setIsLoading(false)
     }
     load()
   }, [])
 
-  function togglePeriod(p: string) {
-    setExpandedPeriods(prev => { const n = new Set(prev); n.has(p) ? n.delete(p) : n.add(p); return n })
-  }
   function toggleCloser(key: string) {
     setExpandedClosers(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
   }
@@ -145,40 +141,29 @@ function RelatoriosContent() {
             Nenhum dado encontrado.
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {periods.map(p => {
-              const isOpen = expandedPeriods.has(p.period)
-              return (
-                <div key={p.period} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
-
-                  {/* ── Header do período ─────────────────────────────── */}
-                  <button onClick={() => togglePeriod(p.period)} style={{
-                    width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '18px 24px', background: 'none', border: 'none', cursor: 'pointer',
-                    color: 'var(--text)', fontFamily: 'inherit',
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
-                      <span style={{ fontWeight: 800, fontSize: 16 }}>{p.label}</span>
-                      <div style={{ display: 'flex', gap: 12 }}>
-                        {[
-                          { label: 'Total',      value: p.total,     color: 'var(--text2)' },
-                          { label: 'Realizadas', value: p.realized,  color: 'var(--green)' },
-                          { label: 'Canceladas', value: p.canceled,  color: 'var(--red)'   },
-                          { label: 'No-show',    value: p.noshow,    color: 'var(--orange)'},
-                          { label: 'Agendadas',  value: p.scheduled, color: 'var(--action)'},
-                        ].map(s => (
-                          <span key={s.label} style={{ fontSize: 13, color: s.color, fontWeight: 600 }}>
-                            {s.value} {s.label.toLowerCase()}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                    <ChevronDown size={16} style={{ color: 'var(--text2)', flexShrink: 0, transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
+          <>
+            {/* ── Filtro de mês ──────────────────────────────────────── */}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
+              {periods.map(p => {
+                const active = selectedPeriod === p.period
+                return (
+                  <button key={p.period} onClick={() => { setSelectedPeriod(p.period); setExpandedClosers(new Set()) }}
+                    style={{
+                      padding: '7px 18px', borderRadius: 20, border: `1px solid ${active ? 'transparent' : 'var(--border)'}`,
+                      background: active ? 'var(--action)' : 'var(--bg-card)',
+                      color: active ? '#fff' : 'var(--text2)',
+                      fontWeight: 600, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', transition: 'all .15s',
+                    }}>
+                    {p.label}
                   </button>
+                )
+              })}
+            </div>
 
-                  {/* ── Conteúdo expandido ────────────────────────────── */}
-                  {isOpen && (
-                    <div style={{ borderTop: '1px solid var(--border)', padding: 24 }}>
+            {/* ── Período selecionado ────────────────────────────────── */}
+            {periods.filter(p => p.period === selectedPeriod).map(p => (
+              <div key={p.period} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
+                <div style={{ padding: 24 }}>
 
                       {/* KPIs do período */}
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 10, marginBottom: 24 }}>
@@ -270,12 +255,10 @@ function RelatoriosContent() {
                           </div>
                         </>
                       )}
-                    </div>
-                  )}
                 </div>
-              )
-            })}
-          </div>
+              </div>
+            ))}
+          </>
         )}
       </div>
     </>
