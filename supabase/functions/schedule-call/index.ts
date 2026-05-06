@@ -10,7 +10,7 @@ const CORS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const ADMIN_EMAIL = 'jeferson@cakto.com.br'
+const ADMIN_EMAIL = 'wilsonneto@cakto.com.br'
 
 async function getAccessToken(): Promise<string> {
   const clientId     = Deno.env.get('GOOGLE_CLIENT_ID')     ?? ''
