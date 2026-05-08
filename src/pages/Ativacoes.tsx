@@ -592,18 +592,20 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
                             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text2)', padding: 4, borderRadius: 6 }}>
                             <Eye size={16} />
                           </button>
+                          <>
+                            <button title="Definir Indicação"
+                              onClick={() => {
+                                setSelectedActivationForIndication(a.id)
+                                setSelectedIndicator(a.indicado_por || '')
+                                setIsIndicationModalOpen(true)
+                              }}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer',
+                                color: a.indicado_por ? 'var(--green)' : 'var(--text2)', padding: 4, borderRadius: 6 }}>
+                              <UserCheck size={16} />
+                            </button>
+                          </>
                           {isAdmin && (
                             <>
-                              <button title="Definir Indicação"
-                                onClick={() => {
-                                  setSelectedActivationForIndication(a.id)
-                                  setSelectedIndicator(a.indicado_por || '')
-                                  setIsIndicationModalOpen(true)
-                                }}
-                                style={{ background: 'none', border: 'none', cursor: 'pointer',
-                                  color: a.indicado_por ? 'var(--green)' : 'var(--text2)', padding: 4, borderRadius: 6 }}>
-                                <UserCheck size={16} />
-                              </button>
                               <button title="Editar"
                                 onClick={() => {
                                   setForm({ ...a, email: a.email || '', phone: a.phone || '',
