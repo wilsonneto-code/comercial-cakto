@@ -9,6 +9,7 @@ import Formularios from './pages/Formularios'
 import Estoque from './pages/Estoque'
 import Agenda from './pages/Agenda'
 import RelatoriosCalls from './pages/RelatoriosCalls'
+import MetabasePage from './pages/MetabasePage'
 import Dashboards from './pages/Dashboards'
 import Configuracoes from './pages/Configuracoes'
 import DashboardTime from './pages/DashboardTime'
@@ -69,6 +70,7 @@ export default function App() {
       <Route path="/dashboard/time/:timeId" element={<ProtectedRoute><DashboardTime /></ProtectedRoute>} />
       <Route path="/dashboard/lifetime" element={<ProtectedRoute><DashboardLifetime /></ProtectedRoute>} />
       <Route path="/configuracoes" element={<ProtectedRoute><Configuracoes /></ProtectedRoute>} />
+      <Route path="/metabase" element={<ProtectedRoute><MetabasePage /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
