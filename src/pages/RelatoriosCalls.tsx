@@ -68,18 +68,20 @@ function RelatoriosContent() {
   const [expandedClosers, setExpandedClosers] = useState<Set<string>>(new Set())
   const [savingId, setSavingId]               = useState<string | null>(null)
 
-  async function updateCallStatus(callId: string, newStatus: string) {
+  async function updateCallAtivacao(callId: string, ativado: boolean) {
     setSavingId(callId)
-    const { error } = await supabase.from('calls').update({ status: newStatus }).eq('id', callId)
+    const { error } = await supabase.from('calls').update({ ativado }).eq('id', callId)
     if (!error) {
       setPeriods(prev => prev.map(p => ({
         ...p,
+        ativados:    p.closers.flatMap(c => c.calls).filter(r => (r.id === callId ? ativado : r.ativado) === true).length,
+        naoAtivados: p.closers.flatMap(c => c.calls).filter(r => (r.id === callId ? ativado : r.ativado) === false).length,
         closers: p.closers.map(c => ({
           ...c,
-          calls: c.calls.map(r => r.id === callId ? { ...r, status: newStatus } : r),
-          done: c.calls.filter(r => (r.id === callId ? newStatus : r.status) === 'Realizada').length,
+          calls:       c.calls.map(r => r.id === callId ? { ...r, ativado } : r),
+          ativados:    c.calls.filter(r => (r.id === callId ? ativado : r.ativado) === true).length,
+          naoAtivados: c.calls.filter(r => (r.id === callId ? ativado : r.ativado) === false).length,
         })),
-        realized: p.closers.flatMap(c => c.calls).filter(r => (r.id === callId ? newStatus : r.status) === 'Realizada').length,
       })))
     }
     setSavingId(null)
@@ -322,21 +324,30 @@ function RelatoriosContent() {
                                                   </span>
                                                 )}
                                               </td>
-                                              {/* Botões de status — apenas para calls não arquivadas */}
+                                              {/* Botões de ativação — apenas para calls não arquivadas */}
                                               <td style={{ padding: '7px 14px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
                                                 {row.source === 'calls' ? (
                                                   <div style={{ display: 'flex', gap: 4 }}>
-                                                    {['Realizada', 'Cancelada', 'No-show'].map(s => (
-                                                      <button key={s} disabled={savingId === row.id || row.status === s}
-                                                        onClick={() => updateCallStatus(row.id, s)}
-                                                        style={{
-                                                          padding: '3px 8px', borderRadius: 6, border: `1px solid ${row.status === s ? CALL_STATUS_COLORS[s] : 'var(--border)'}`,
-                                                          background: row.status === s ? `color-mix(in srgb, ${CALL_STATUS_COLORS[s]} 20%, var(--bg-card2))` : 'var(--bg-card)',
-                                                          color: row.status === s ? CALL_STATUS_COLORS[s] : 'var(--text2)',
-                                                          fontSize: 10, fontWeight: 700, cursor: row.status === s ? 'default' : 'pointer',
-                                                          fontFamily: 'inherit', opacity: savingId === row.id ? 0.5 : 1,
-                                                        }}>{s}</button>
-                                                    ))}
+                                                    <button disabled={savingId === row.id}
+                                                      onClick={() => updateCallAtivacao(row.id, true)}
+                                                      style={{
+                                                        padding: '3px 8px', borderRadius: 6,
+                                                        border: `1px solid ${row.ativado === true ? 'var(--green)' : 'var(--border)'}`,
+                                                        background: row.ativado === true ? 'color-mix(in srgb, var(--green) 20%, var(--bg-card2))' : 'var(--bg-card)',
+                                                        color: row.ativado === true ? 'var(--green)' : 'var(--text2)',
+                                                        fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                                                        fontFamily: 'inherit', opacity: savingId === row.id ? 0.5 : 1,
+                                                      }}>Ativado</button>
+                                                    <button disabled={savingId === row.id}
+                                                      onClick={() => updateCallAtivacao(row.id, false)}
+                                                      style={{
+                                                        padding: '3px 8px', borderRadius: 6,
+                                                        border: `1px solid ${row.ativado === false ? 'var(--red)' : 'var(--border)'}`,
+                                                        background: row.ativado === false ? 'color-mix(in srgb, var(--red) 20%, var(--bg-card2))' : 'var(--bg-card)',
+                                                        color: row.ativado === false ? 'var(--red)' : 'var(--text2)',
+                                                        fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                                                        fontFamily: 'inherit', opacity: savingId === row.id ? 0.5 : 1,
+                                                      }}>Não Ativado</button>
                                                   </div>
                                                 ) : (
                                                   <span style={{ color: 'var(--text2)', fontSize: 10 }}>arquivada</span>
