@@ -222,15 +222,35 @@ function RelatoriosContent() {
                                         {c.naoAtivados > 0 && <span style={{ color: 'var(--red)', marginLeft: 6 }}>· {c.naoAtivados} não ativados</span>}
                                       </div>
                                     </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                      <div style={{ width: 80 }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
-                                          <span style={{ color: 'var(--text2)' }}>{c.rate}%</span>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                      {/* Taxa de Realização */}
+                                      <div style={{ width: 90 }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginBottom: 3 }}>
+                                          <span style={{ color: 'var(--text2)' }}>Realização</span>
+                                          <span style={{ fontWeight: 700, color: c.rate >= 70 ? 'var(--green)' : c.rate >= 40 ? 'var(--orange)' : 'var(--red)' }}>{c.rate}%</span>
                                         </div>
                                         <div style={{ height: 5, borderRadius: 3, background: 'var(--border)' }}>
                                           <div style={{ height: '100%', borderRadius: 3, width: `${c.rate}%`, background: c.rate >= 70 ? 'var(--green)' : c.rate >= 40 ? 'var(--orange)' : 'var(--red)', transition: 'width .3s' }} />
                                         </div>
                                       </div>
+                                      {/* Taxa de Ativação */}
+                                      {(() => {
+                                        const respondidas = c.ativados + c.naoAtivados
+                                        const taxaAtiv = respondidas > 0 ? Math.round((c.ativados / respondidas) * 100) : null
+                                        return (
+                                          <div style={{ width: 90 }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginBottom: 3 }}>
+                                              <span style={{ color: 'var(--text2)' }}>Ativação</span>
+                                              <span style={{ fontWeight: 700, color: taxaAtiv === null ? 'var(--text2)' : taxaAtiv >= 70 ? 'var(--green)' : taxaAtiv >= 40 ? 'var(--orange)' : 'var(--red)' }}>
+                                                {taxaAtiv === null ? '—' : `${taxaAtiv}%`}
+                                              </span>
+                                            </div>
+                                            <div style={{ height: 5, borderRadius: 3, background: 'var(--border)' }}>
+                                              <div style={{ height: '100%', borderRadius: 3, width: `${taxaAtiv ?? 0}%`, background: taxaAtiv === null ? 'var(--border)' : taxaAtiv >= 70 ? 'var(--green)' : taxaAtiv >= 40 ? 'var(--orange)' : 'var(--red)', transition: 'width .3s' }} />
+                                            </div>
+                                          </div>
+                                        )
+                                      })()}
                                       <ChevronDown size={14} style={{ color: 'var(--text2)', transform: closerOpen ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
                                     </div>
                                   </button>
