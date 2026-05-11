@@ -30,6 +30,7 @@ type HistRow = {
   id: string; title: string; date: string; time: string; end_time: string | null
   responsible: string; status: string; notes: string; client_email: string
   google_event_id: string; meet_link: string; period: string
+  ativado: boolean | null; motivo_nao_ativacao: string | null
 }
 type PeriodStats = {
   period: string
@@ -39,9 +40,12 @@ type PeriodStats = {
   canceled: number
   noshow: number
   scheduled: number
+  ativados: number
+  naoAtivados: number
   closers: {
     id: string; name: string; total: number; done: number; rate: number
-    calls: { title: string; date: string; time: string; status: string }[]
+    ativados: number; naoAtivados: number
+    calls: { title: string; date: string; time: string; status: string; ativado: boolean | null; motivo_nao_ativacao: string | null }[]
   }[]
 }
 
@@ -71,7 +75,7 @@ function RelatoriosContent() {
           .select('id,title,date,time,end_time,responsible,status,notes,client_email,google_event_id,meet_link,period')
           .order('period', { ascending: false }),
         supabase.from('calls')
-          .select('id,title,date,time,end_time,responsible,status,notes,client_email,google_event_id,meet_link'),
+          .select('id,title,date,time,end_time,responsible,status,notes,client_email,google_event_id,meet_link,ativado,motivo_nao_ativacao'),
       ])
 
       const users  = (dbUsers  || []) as DbUser[]
@@ -79,7 +83,9 @@ function RelatoriosContent() {
 
       const currentRows: HistRow[] = (dbCalls || []).map((c: any) => ({
         ...c,
-        period: (c.date as string)?.slice(0, 7) ?? currentPeriod,
+        period:              (c.date as string)?.slice(0, 7) ?? currentPeriod,
+        ativado:             c.ativado ?? null,
+        motivo_nao_ativacao: c.motivo_nao_ativacao ?? null,
       }))
       const allRows: HistRow[] = [...(dbHistory || []).map((c: any) => c as HistRow), ...currentRows]
 
@@ -95,21 +101,25 @@ function RelatoriosContent() {
         result.push({
           period,
           label: `${MONTHS[pm - 1]} ${py}${period === currentPeriod ? ' (mês atual)' : ''}`,
-          total:     rows.length,
-          realized:  rows.filter(r => r.status === 'Realizada').length,
-          canceled:  rows.filter(r => r.status === 'Cancelada').length,
-          noshow:    rows.filter(r => r.status === 'No-show').length,
-          scheduled: rows.filter(r => r.status === 'Agendada').length,
+          total:       rows.length,
+          realized:    rows.filter(r => r.status === 'Realizada').length,
+          canceled:    rows.filter(r => r.status === 'Cancelada').length,
+          noshow:      rows.filter(r => r.status === 'No-show').length,
+          scheduled:   rows.filter(r => r.status === 'Agendada').length,
+          ativados:    rows.filter(r => r.ativado === true).length,
+          naoAtivados: rows.filter(r => r.ativado === false).length,
           closers: closers.map(u => {
             const uRows = rows.filter(r => r.responsible === u.id)
             const done  = uRows.filter(r => r.status === 'Realizada').length
             return {
               id: u.id, name: u.name,
               total: uRows.length, done,
-              rate: uRows.length ? Math.round((done / uRows.length) * 100) : 0,
+              rate:        uRows.length ? Math.round((done / uRows.length) * 100) : 0,
+              ativados:    uRows.filter(r => r.ativado === true).length,
+              naoAtivados: uRows.filter(r => r.ativado === false).length,
               calls: uRows
                 .sort((a, b) => a.date.localeCompare(b.date))
-                .map(r => ({ title: r.title, date: r.date, time: (r.time || '').slice(0, 5), status: r.status })),
+                .map(r => ({ title: r.title, date: r.date, time: (r.time || '').slice(0, 5), status: r.status, ativado: r.ativado ?? null, motivo_nao_ativacao: r.motivo_nao_ativacao ?? null })),
             }
           }).filter(c => c.total > 0),
         })
@@ -171,12 +181,14 @@ function RelatoriosContent() {
                       {/* KPIs do período */}
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 10, marginBottom: 24 }}>
                         {[
-                          { label: 'Total de Calls', value: p.total,     color: 'var(--text)'   },
-                          { label: 'Realizadas',     value: p.realized,  color: 'var(--green)'  },
+                          { label: 'Total de Calls', value: p.total,       color: 'var(--text)'   },
+                          { label: 'Realizadas',     value: p.realized,    color: 'var(--green)'  },
                           { label: 'Taxa Realização',value: p.total ? `${Math.round((p.realized / p.total) * 100)}%` : '—', color: p.total && (p.realized / p.total) >= 0.7 ? 'var(--green)' : 'var(--orange)' },
-                          { label: 'Canceladas',     value: p.canceled,  color: 'var(--red)'    },
-                          { label: 'No-show',        value: p.noshow,    color: 'var(--orange)'  },
-                          { label: 'Agendadas',      value: p.scheduled, color: 'var(--action)'  },
+                          { label: 'Ativados',       value: p.ativados,    color: 'var(--green)'  },
+                          { label: 'Não Ativados',   value: p.naoAtivados, color: 'var(--red)'    },
+                          { label: 'Canceladas',     value: p.canceled,    color: 'var(--red)'    },
+                          { label: 'No-show',        value: p.noshow,      color: 'var(--orange)' },
+                          { label: 'Agendadas',      value: p.scheduled,   color: 'var(--action)' },
                         ].map(k => (
                           <div key={k.label} style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: 14 }}>
                             <div style={{ fontSize: 22, fontWeight: 800, color: k.color }}>{k.value}</div>
@@ -204,7 +216,11 @@ function RelatoriosContent() {
                                     <Avatar name={c.name} size={32} />
                                     <div style={{ flex: 1, textAlign: 'left' }}>
                                       <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
-                                      <div style={{ fontSize: 11, color: 'var(--text2)' }}>{c.total} call{c.total !== 1 ? 's' : ''} · {c.done} realizadas</div>
+                                      <div style={{ fontSize: 11, color: 'var(--text2)' }}>
+                                        {c.total} call{c.total !== 1 ? 's' : ''} · {c.done} realizadas
+                                        {c.ativados > 0 && <span style={{ color: 'var(--green)', marginLeft: 6 }}>· {c.ativados} ativados</span>}
+                                        {c.naoAtivados > 0 && <span style={{ color: 'var(--red)', marginLeft: 6 }}>· {c.naoAtivados} não ativados</span>}
+                                      </div>
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                                       <div style={{ width: 80 }}>
@@ -223,7 +239,7 @@ function RelatoriosContent() {
                                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                                         <thead>
                                           <tr>
-                                            {['Data', 'Hora', 'Título', 'Status'].map(h => (
+                                            {['Data', 'Hora', 'Título', 'Status', 'Ativação'].map(h => (
                                               <th key={h} style={{ padding: '7px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700,
                                                 color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em',
                                                 borderBottom: '1px solid var(--border)', background: 'var(--bg-card)', whiteSpace: 'nowrap' }}>{h}</th>
@@ -245,6 +261,17 @@ function RelatoriosContent() {
                                                   border: `1px solid ${CALL_STATUS_COLORS[row.status] || 'var(--border)'}`,
                                                   borderRadius: 20, padding: '2px 9px', fontSize: 10, fontWeight: 700,
                                                 }}>{row.status}</span>
+                                              </td>
+                                              <td style={{ padding: '7px 14px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                                                {row.ativado === null ? (
+                                                  <span style={{ color: 'var(--text2)', fontSize: 10 }}>—</span>
+                                                ) : row.ativado ? (
+                                                  <span style={{ background: 'color-mix(in srgb, var(--green) 15%, var(--bg-card2))', color: 'var(--green)', border: '1px solid var(--green)', borderRadius: 20, padding: '2px 9px', fontSize: 10, fontWeight: 700 }}>Ativado</span>
+                                                ) : (
+                                                  <span title={row.motivo_nao_ativacao || ''} style={{ background: 'color-mix(in srgb, var(--red) 15%, var(--bg-card2))', color: 'var(--red)', border: '1px solid var(--red)', borderRadius: 20, padding: '2px 9px', fontSize: 10, fontWeight: 700, cursor: row.motivo_nao_ativacao ? 'help' : 'default' }}>
+                                                    Não Ativado{row.motivo_nao_ativacao ? ' ⓘ' : ''}
+                                                  </span>
+                                                )}
                                               </td>
                                             </tr>
                                           ))}
