@@ -31,6 +31,7 @@ type HistRow = {
   responsible: string; status: string; notes: string; client_email: string
   google_event_id: string; meet_link: string; period: string
   ativado: boolean | null; motivo_nao_ativacao: string | null
+  source: 'calls' | 'history'
 }
 type PeriodStats = {
   period: string
@@ -45,7 +46,7 @@ type PeriodStats = {
   closers: {
     id: string; name: string; total: number; done: number; rate: number
     ativados: number; naoAtivados: number
-    calls: { title: string; date: string; time: string; status: string; ativado: boolean | null; motivo_nao_ativacao: string | null }[]
+    calls: { id: string; title: string; date: string; time: string; status: string; notes: string; client_email: string; ativado: boolean | null; motivo_nao_ativacao: string | null; source: 'calls' | 'history' }[]
   }[]
 }
 
@@ -65,6 +66,24 @@ function RelatoriosContent() {
   const [periods, setPeriods]                 = useState<PeriodStats[]>([])
   const [selectedPeriod, setSelectedPeriod]   = useState<string>(currentPeriod)
   const [expandedClosers, setExpandedClosers] = useState<Set<string>>(new Set())
+  const [savingId, setSavingId]               = useState<string | null>(null)
+
+  async function updateCallStatus(callId: string, newStatus: string) {
+    setSavingId(callId)
+    const { error } = await supabase.from('calls').update({ status: newStatus }).eq('id', callId)
+    if (!error) {
+      setPeriods(prev => prev.map(p => ({
+        ...p,
+        closers: p.closers.map(c => ({
+          ...c,
+          calls: c.calls.map(r => r.id === callId ? { ...r, status: newStatus } : r),
+          done: c.calls.filter(r => (r.id === callId ? newStatus : r.status) === 'Realizada').length,
+        })),
+        realized: p.closers.flatMap(c => c.calls).filter(r => (r.id === callId ? newStatus : r.status) === 'Realizada').length,
+      })))
+    }
+    setSavingId(null)
+  }
 
   useEffect(() => {
     async function load() {
@@ -86,8 +105,12 @@ function RelatoriosContent() {
         period:              (c.date as string)?.slice(0, 7) ?? currentPeriod,
         ativado:             c.ativado ?? null,
         motivo_nao_ativacao: c.motivo_nao_ativacao ?? null,
+        source:              'calls' as const,
       }))
-      const allRows: HistRow[] = [...(dbHistory || []).map((c: any) => c as HistRow), ...currentRows]
+      const allRows: HistRow[] = [
+        ...(dbHistory || []).map((c: any) => ({ ...c, source: 'history' as const })),
+        ...currentRows,
+      ]
 
       const periodMap = new Map<string, HistRow[]>()
       for (const row of allRows) {
@@ -119,7 +142,7 @@ function RelatoriosContent() {
               naoAtivados: uRows.filter(r => r.ativado === false).length,
               calls: uRows
                 .sort((a, b) => a.date.localeCompare(b.date))
-                .map(r => ({ title: r.title, date: r.date, time: (r.time || '').slice(0, 5), status: r.status, ativado: r.ativado ?? null, motivo_nao_ativacao: r.motivo_nao_ativacao ?? null })),
+                .map(r => ({ id: r.id, title: r.title, date: r.date, time: (r.time || '').slice(0, 5), status: r.status, notes: r.notes ?? '', client_email: r.client_email ?? '', ativado: r.ativado ?? null, motivo_nao_ativacao: r.motivo_nao_ativacao ?? null, source: r.source })),
             }
           }).filter(c => c.total > 0),
         })
@@ -259,7 +282,7 @@ function RelatoriosContent() {
                                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                                         <thead>
                                           <tr>
-                                            {['Data', 'Hora', 'Título', 'Status', 'Ativação'].map(h => (
+                                            {['Data', 'Hora', 'Título', 'Cliente', 'Observações', 'Status', 'Ativação', ''].map(h => (
                                               <th key={h} style={{ padding: '7px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700,
                                                 color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em',
                                                 borderBottom: '1px solid var(--border)', background: 'var(--bg-card)', whiteSpace: 'nowrap' }}>{h}</th>
@@ -273,7 +296,13 @@ function RelatoriosContent() {
                                                 {new Date(row.date + 'T12:00:00').toLocaleDateString('pt-BR')}
                                               </td>
                                               <td style={{ padding: '7px 14px', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{row.time}</td>
-                                              <td style={{ padding: '7px 14px', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>{row.title}</td>
+                                              <td style={{ padding: '7px 14px', borderBottom: '1px solid var(--border)', fontWeight: 600, maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.title}</td>
+                                              <td style={{ padding: '7px 14px', borderBottom: '1px solid var(--border)', color: 'var(--text2)', maxWidth: 160, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                {row.client_email || '—'}
+                                              </td>
+                                              <td style={{ padding: '7px 14px', borderBottom: '1px solid var(--border)', color: 'var(--text2)', maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={row.notes}>
+                                                {row.notes || '—'}
+                                              </td>
                                               <td style={{ padding: '7px 14px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
                                                 <span style={{
                                                   background: `color-mix(in srgb, ${CALL_STATUS_COLORS[row.status] || 'var(--text2)'} 15%, var(--bg-card2))`,
@@ -291,6 +320,26 @@ function RelatoriosContent() {
                                                   <span title={row.motivo_nao_ativacao || ''} style={{ background: 'color-mix(in srgb, var(--red) 15%, var(--bg-card2))', color: 'var(--red)', border: '1px solid var(--red)', borderRadius: 20, padding: '2px 9px', fontSize: 10, fontWeight: 700, cursor: row.motivo_nao_ativacao ? 'help' : 'default' }}>
                                                     Não Ativado{row.motivo_nao_ativacao ? ' ⓘ' : ''}
                                                   </span>
+                                                )}
+                                              </td>
+                                              {/* Botões de status — apenas para calls não arquivadas */}
+                                              <td style={{ padding: '7px 14px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                                                {row.source === 'calls' ? (
+                                                  <div style={{ display: 'flex', gap: 4 }}>
+                                                    {['Realizada', 'Cancelada', 'No-show'].map(s => (
+                                                      <button key={s} disabled={savingId === row.id || row.status === s}
+                                                        onClick={() => updateCallStatus(row.id, s)}
+                                                        style={{
+                                                          padding: '3px 8px', borderRadius: 6, border: `1px solid ${row.status === s ? CALL_STATUS_COLORS[s] : 'var(--border)'}`,
+                                                          background: row.status === s ? `color-mix(in srgb, ${CALL_STATUS_COLORS[s]} 20%, var(--bg-card2))` : 'var(--bg-card)',
+                                                          color: row.status === s ? CALL_STATUS_COLORS[s] : 'var(--text2)',
+                                                          fontSize: 10, fontWeight: 700, cursor: row.status === s ? 'default' : 'pointer',
+                                                          fontFamily: 'inherit', opacity: savingId === row.id ? 0.5 : 1,
+                                                        }}>{s}</button>
+                                                    ))}
+                                                  </div>
+                                                ) : (
+                                                  <span style={{ color: 'var(--text2)', fontSize: 10 }}>arquivada</span>
                                                 )}
                                               </td>
                                             </tr>
