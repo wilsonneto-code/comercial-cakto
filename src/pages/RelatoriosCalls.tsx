@@ -77,7 +77,10 @@ function RelatoriosContent() {
       const users  = (dbUsers  || []) as DbUser[]
       const closers = users.filter(u => u.role === 'Closer')
 
-      const currentRows: HistRow[] = (dbCalls || []).map((c: any) => ({ ...c, period: currentPeriod }))
+      const currentRows: HistRow[] = (dbCalls || []).map((c: any) => ({
+        ...c,
+        period: (c.date as string)?.slice(0, 7) ?? currentPeriod,
+      }))
       const allRows: HistRow[] = [...(dbHistory || []).map((c: any) => c as HistRow), ...currentRows]
 
       const periodMap = new Map<string, HistRow[]>()
