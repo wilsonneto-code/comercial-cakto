@@ -44,18 +44,20 @@ const MONTHS_PT = ['janeiro','fevereiro','março','abril','maio','junho','julho'
 
 type DbUser  = { id: string; name: string; role: string }
 type CallItem = {
-  id:              string
-  title:           string
-  date:            string
-  time:            string
-  endTime:         string
-  responsibleId:   string
-  responsible:     string
-  status:          string
-  notes:           string
-  clientEmail:     string
-  google_event_id: string
-  meet_link:       string
+  id:                    string
+  title:                 string
+  date:                  string
+  time:                  string
+  endTime:               string
+  responsibleId:         string
+  responsible:           string
+  status:                string
+  notes:                 string
+  clientEmail:           string
+  google_event_id:       string
+  meet_link:             string
+  ativado:               boolean | null
+  motivo_nao_ativacao:   string | null
 }
 
 function formatInviteText(call: CallItem): string {
@@ -106,6 +108,7 @@ function AgendaContent() {
   const [editCall, setEditCall]       = useState<CallItem | null>(null);
   const [form, setForm]               = useState({ ...EMPTY_FORM });
   const [closerModal, setCloserModal] = useState<{ id: string; name: string } | null>(null);
+  const [motivoInput, setMotivoInput] = useState('');
 
   const [history, setHistory]               = useState<HistoryCall[]>([]);
   const [expandedPeriods, setExpandedPeriods] = useState<Set<string>>(new Set());
@@ -116,7 +119,7 @@ function AgendaContent() {
       setIsLoading(true);
       const [{ data: dbCalls, error: ce }, { data: dbUsers, error: ue }, { data: dbHistory }] = await Promise.all([
         supabase.from('calls')
-          .select('id,title,date,time,end_time,responsible,status,notes,client_email,google_event_id,meet_link')
+          .select('id,title,date,time,end_time,responsible,status,notes,client_email,google_event_id,meet_link,ativado,motivo_nao_ativacao')
           .order('date').order('time'),
         supabase.from('users').select('id,name,role').order('name'),
         supabase.from('calls_history')
@@ -139,8 +142,10 @@ function AgendaContent() {
         status:          c.status,
         notes:           c.notes ?? '',
         clientEmail:     c.client_email ?? '',
-        google_event_id: c.google_event_id ?? '',
-        meet_link:       c.meet_link ?? '',
+        google_event_id:     c.google_event_id ?? '',
+        meet_link:           c.meet_link ?? '',
+        ativado:             c.ativado ?? null,
+        motivo_nao_ativacao: c.motivo_nao_ativacao ?? null,
         ...(period !== undefined ? { period } : {}),
       });
 
@@ -342,6 +347,15 @@ function AgendaContent() {
     setCalls(p => p.map(c => c.id === id ? { ...c, status } : c));
     setSheetCall(prev => prev?.id === id ? { ...prev, status } : prev);
     toast(`Status: ${status}`, 'success');
+  }
+
+  async function saveAtivacao(id: string, ativado: boolean, motivo?: string) {
+    const patch = { ativado, motivo_nao_ativacao: ativado ? null : (motivo ?? '') };
+    const { error } = await supabase.from('calls').update(patch).eq('id', id);
+    if (error) { toast(error.message, 'error'); return; }
+    setCalls(p => p.map(c => c.id === id ? { ...c, ...patch } : c));
+    setSheetCall(prev => prev?.id === id ? { ...prev, ...patch } : prev);
+    toast(ativado ? 'Marcado como Ativado ✓' : 'Marcado como Não Ativado', 'success');
   }
 
   const upcoming = filteredCalls
@@ -913,6 +927,76 @@ function AgendaContent() {
                   <Button size="sm" variant="destructive" icon={XCircle}     onClick={() => updateStatus(sheetCall.id, 'Cancelada')}>Cancelada</Button>
                   <Button size="sm" variant="warning"     icon={Clock}       onClick={() => updateStatus(sheetCall.id, 'No-show')}>No-show</Button>
                 </div>
+              </div>
+
+              {/* ── Ativação ──────────────────────────────────────────────── */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Ativação</div>
+
+                {/* Estado atual */}
+                {sheetCall.ativado !== null && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
+                    borderRadius: 8, fontSize: 13, fontWeight: 600,
+                    background: sheetCall.ativado ? 'color-mix(in srgb, var(--green) 15%, var(--bg-card2))' : 'color-mix(in srgb, var(--red) 15%, var(--bg-card2))',
+                    color: sheetCall.ativado ? 'var(--green)' : 'var(--red)',
+                    border: `1px solid ${sheetCall.ativado ? 'var(--green)' : 'var(--red)'}`,
+                  }}>
+                    {sheetCall.ativado ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                    {sheetCall.ativado ? 'Ativado' : `Não Ativado${sheetCall.motivo_nao_ativacao ? ` — ${sheetCall.motivo_nao_ativacao}` : ''}`}
+                  </div>
+                )}
+
+                {/* Botões */}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button onClick={() => saveAtivacao(sheetCall.id, true)} style={{
+                    padding: '7px 16px', borderRadius: 8, border: `1px solid ${sheetCall.ativado === true ? 'var(--green)' : 'var(--border)'}`,
+                    background: sheetCall.ativado === true ? 'color-mix(in srgb, var(--green) 20%, var(--bg-card2))' : 'var(--bg-card2)',
+                    color: sheetCall.ativado === true ? 'var(--green)' : 'var(--text)', fontWeight: 600, fontSize: 13,
+                    cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 6,
+                  }}>
+                    <CheckCircle size={14} /> Ativado
+                  </button>
+                  <button onClick={() => {
+                    setMotivoInput(sheetCall.motivo_nao_ativacao || '');
+                    setSheetCall(prev => prev ? { ...prev, _showMotivo: true } as any : prev);
+                  }} style={{
+                    padding: '7px 16px', borderRadius: 8, border: `1px solid ${sheetCall.ativado === false ? 'var(--red)' : 'var(--border)'}`,
+                    background: sheetCall.ativado === false ? 'color-mix(in srgb, var(--red) 20%, var(--bg-card2))' : 'var(--bg-card2)',
+                    color: sheetCall.ativado === false ? 'var(--red)' : 'var(--text)', fontWeight: 600, fontSize: 13,
+                    cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 6,
+                  }}>
+                    <XCircle size={14} /> Não Ativado
+                  </button>
+                </div>
+
+                {/* Campo de motivo */}
+                {(sheetCall as any)._showMotivo && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <textarea
+                      className="inp"
+                      rows={2}
+                      value={motivoInput}
+                      onChange={e => setMotivoInput(e.target.value)}
+                      placeholder="Informe o motivo da não ativação…"
+                      style={{ resize: 'vertical', fontSize: 13 }}
+                    />
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={() => {
+                        saveAtivacao(sheetCall.id, false, motivoInput);
+                        setSheetCall(prev => prev ? { ...prev, _showMotivo: false } as any : prev);
+                      }} style={{
+                        padding: '7px 16px', borderRadius: 8, border: 'none',
+                        background: 'var(--red)', color: '#fff', fontWeight: 700, fontSize: 13,
+                        cursor: 'pointer', fontFamily: 'inherit',
+                      }}>Salvar</button>
+                      <button onClick={() => setSheetCall(prev => prev ? { ...prev, _showMotivo: false } as any : prev)}
+                        style={{ padding: '7px 16px', borderRadius: 8, border: '1px solid var(--border)',
+                          background: 'var(--bg-card2)', color: 'var(--text2)', fontWeight: 600, fontSize: 13,
+                          cursor: 'pointer', fontFamily: 'inherit' }}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', gap: 8 }}>
