@@ -24,21 +24,45 @@ const CLOSER_META: Record<string, { closer: string }> = {
 const IGNORE_IDS = new Set([
   '6ed13d75-cdad-482b-aab3-57860abe0483',
 ])
+const IGNORE_NAMES = new Set([
+  'Cadastros',
+  'SDR Instagram',
+  'Internacional',
+  'Premiações',
+  'Premiacoes',
+])
 
 async function fetchAllPages(url: string, headers: Record<string, string>) {
-  const all: any[] = []
-  let skip = 0
-  const take = 100
-  while (true) {
-    const sep = url.includes('?') ? '&' : '?'
-    const res = await fetch(`${url}${sep}take=${take}&skip=${skip}`, { headers })
-    const d = await res.json()
-    const rows = d.data ?? []
-    all.push(...rows)
-    if (rows.length < take) break
-    skip += take
+  const take = 1000
+  const sep = url.includes('?') ? '&' : '?'
+
+  // Primeira página: descobre o total
+  const firstRes = await fetch(`${url}${sep}take=${take}&skip=0`, { headers })
+  const firstData = await firstRes.json()
+  const declaredTotal: number = firstData.count ?? firstData.total ?? 0
+  const firstRows: any[] = firstData.data ?? []
+
+  if (firstRows.length >= declaredTotal || firstRows.length < take) {
+    return { rows: firstRows, declaredTotal }
   }
-  return all
+
+  // Demais páginas em paralelo (lotes de 10 para não sobrecarregar a API)
+  const remaining = Math.ceil((declaredTotal - take) / take)
+  const BATCH = 10
+  const all: any[] = [...firstRows]
+
+  for (let i = 0; i < remaining; i += BATCH) {
+    const batch = Array.from({ length: Math.min(BATCH, remaining - i) }, (_, j) => {
+      const skip = (i + j + 1) * take
+      return fetch(`${url}${sep}take=${take}&skip=${skip}`, { headers })
+        .then(r => r.json())
+        .then(d => d.data ?? [])
+    })
+    const results = await Promise.all(batch)
+    for (const rows of results) all.push(...rows)
+  }
+
+  return { rows: all, declaredTotal }
 }
 
 serve(async (req) => {
@@ -46,6 +70,9 @@ serve(async (req) => {
 
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } })
+
+  const reqUrl = new URL(req.url)
+  const diagnose = reqUrl.searchParams.get('diagnose') === '1'
 
   try {
     const supabase = createClient(
@@ -60,13 +87,72 @@ serve(async (req) => {
 
     const h = { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
 
+    // ── Modo diagnóstico: descobre quantos negócios a API retorna com cada parâmetro ──
+    if (diagnose) {
+      const variants = [
+        { label: 'sem filtro',                       url: `${BASE}/businesses` },
+        { label: 'startDate=2020-01-01',             url: `${BASE}/businesses?startDate=2020-01-01` },
+        { label: 'startDate=2020-01-01 (movedAt)',   url: `${BASE}/businesses?startDate=2020-01-01&dateType=movedAt` },
+        { label: 'lastMovedAtStart=2020-01-01',      url: `${BASE}/businesses?lastMovedAtStart=2020-01-01` },
+        { label: 'movedAtStart=2020-01-01',          url: `${BASE}/businesses?movedAtStart=2020-01-01` },
+        { label: 'createdAtStart=2020-01-01',        url: `${BASE}/businesses?createdAtStart=2020-01-01` },
+        { label: 'interval=all',                     url: `${BASE}/businesses?interval=all` },
+        { label: 'interval=year&startDate=2020',     url: `${BASE}/businesses?interval=year&startDate=2020-01-01` },
+        { label: 'period=all',                       url: `${BASE}/businesses?period=all` },
+      ]
+      // Só pega take=1 para verificar o count declarado
+      const results = await Promise.all(variants.map(async v => {
+        try {
+          const sep = v.url.includes('?') ? '&' : '?'
+          const res = await fetch(`${v.url}${sep}take=1&skip=0`, { headers: h })
+          const d = await res.json()
+          return {
+            label: v.label,
+            status: res.status,
+            declaredCount: d.count ?? d.total ?? null,
+            firstRow: d.data?.[0] ? Object.keys(d.data[0]).join(', ') : null,
+            rawSample: JSON.stringify(d).substring(0, 200),
+          }
+        } catch (e) {
+          return { label: v.label, error: String(e) }
+        }
+      }))
+
+      // Também testa buscar histórico de movimentações pelo endpoint de businesses de um pipeline específico
+      const pipelinesRes = await fetch(`${BASE}/pipelines?take=50`, { headers: h })
+      const pipelinesData = await pipelinesRes.json()
+      const firstSdrPipeline = (pipelinesData.data ?? []).find((p: any) =>
+        p.name?.toLowerCase().includes('campanha') || p.name?.toLowerCase().includes('iphone')
+      )
+
+      let pipelineBusinessTest = null
+      if (firstSdrPipeline) {
+        // Testa filtrar por pipelineId via parâmetro
+        const r1 = await fetch(`${BASE}/businesses?pipelineId=${firstSdrPipeline.id}&take=1`, { headers: h })
+        const d1 = await r1.json()
+        // Testa via path
+        const r2 = await fetch(`${BASE}/pipelines/${firstSdrPipeline.id}/businesses?take=1`, { headers: h })
+        const d2txt = await r2.text()
+        pipelineBusinessTest = {
+          pipeline: firstSdrPipeline.name,
+          id: firstSdrPipeline.id,
+          'businesses?pipelineId': { status: r1.status, count: d1.count ?? null, sample: JSON.stringify(d1).substring(0, 200) },
+          'pipelines/{id}/businesses': { status: r2.status, body: d2txt.substring(0, 200) },
+        }
+      }
+
+      return json({ variants: results, pipelineBusinessTest })
+    }
+
+    // ── Fluxo principal ──
+
     // 1. Pipelines
     const pipelinesRes = await fetch(`${BASE}/pipelines?take=50`, { headers: h })
     const pipelinesData = await pipelinesRes.json()
     const allPipelines: any[] = pipelinesData.data ?? pipelinesData ?? []
 
     const PIPELINES = allPipelines
-      .filter((p: any) => !IGNORE_IDS.has(p.id))
+      .filter((p: any) => !IGNORE_IDS.has(p.id) && !IGNORE_NAMES.has(p.name))
       .map((p: any) => ({
         id:     p.id,
         name:   p.name,
@@ -90,9 +176,9 @@ serve(async (req) => {
       }
     }
 
-    // 4. Todos os negócios (sem filtro — API ignora filtros)
-    const allBusinesses = await fetchAllPages(`${BASE}/businesses`, h)
-    console.log(`[datacrazy-report] businesses: ${allBusinesses.length}`)
+    // 4. Todos os negócios
+    const { rows: allBusinesses, declaredTotal } = await fetchAllPages(`${BASE}/businesses`, h)
+    console.log(`[datacrazy-report] businesses fetched=${allBusinesses.length} declared=${declaredTotal}`)
 
     // 5. Agrupa por pipeline — sem deduplicação
     const businessesByPipeline = new Map<string, any[]>()
@@ -105,11 +191,10 @@ serve(async (req) => {
       businessesByPipeline.get(pid)!.push(b)
     }
 
-    // 6. Activities — podem conter histórico de mudança de etapa
-    const allActivities = await fetchAllPages(`${BASE}/activities`, h)
+    // 6. Activities
+    const { rows: allActivities } = await fetchAllPages(`${BASE}/activities`, h)
     console.log(`[datacrazy-report] activities: ${allActivities.length}`)
 
-    // Mapa businessId -> lista de activities (para enriquecer dados)
     const activitiesByBusiness = new Map<string, any[]>()
     for (const act of allActivities) {
       const bid = act.businessId ?? act.business?.id
@@ -145,20 +230,23 @@ serve(async (req) => {
           updatedAt:   b.updatedAt,
           lastMovedAt: b.lastMovedAt ?? b.updatedAt ?? b.createdAt,
           total:       b.total ?? 0,
-          // Activities deste negócio (inclui histórico de tarefas/movimentos)
           activities: (activitiesByBusiness.get(b.id) ?? []).map((a: any) => ({
-            id:          a.id,
-            title:       a.title ?? '',
-            type:        a.type ?? a.activityType ?? '',
-            createdAt:   a.createdAt,
-            stageId:     a.stageId ?? a.stage?.id ?? null,
-            stageName:   a.stage?.name ?? a.stageName ?? '',
+            id:        a.id,
+            title:     a.title ?? '',
+            type:      a.type ?? a.activityType ?? '',
+            createdAt: a.createdAt,
+            stageId:   a.stageId ?? a.stage?.id ?? null,
+            stageName: a.stage?.name ?? a.stageName ?? '',
           })),
         })),
       }
     })
 
-    return json({ pipelines: results, fetchedAt: new Date().toISOString() })
+    return json({
+      pipelines: results,
+      fetchedAt: new Date().toISOString(),
+      debug: { totalBusinessesFetched: allBusinesses.length, declaredTotal },
+    })
 
   } catch (e) {
     console.error('[datacrazy-report]', e)
