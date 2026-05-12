@@ -146,7 +146,7 @@ serve(async (req) => {
     if (noteParts.length > 0) {
       const noteRes = await fetch(`${BASE}/leads/${leadId}/notes`, {
         method: 'POST', headers: h,
-        body: JSON.stringify({ history: noteParts.join('\n\n') }),
+        body: JSON.stringify({ note: noteParts.join('\n\n') }),
       })
       console.log(`[sync-datacrazy] Nota postada: ${noteRes.status}`)
     }
