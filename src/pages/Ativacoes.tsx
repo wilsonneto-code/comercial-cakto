@@ -270,6 +270,10 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
       const fechamentoISO = `${form.date}T${time}:00-03:00`
       const closerUser = users.find(u => u.id === form.responsible)
       supabase.auth.getSession().then(({ data: { session } }) => {
+        const authHeaders = session?.access_token
+          ? { Authorization: `Bearer ${session.access_token}` }
+          : undefined
+
         void supabase.functions.invoke('datacrazy-webhook', {
           body: {
             ativacao_id:      (data as DbActivation).id,
@@ -284,9 +288,18 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
             sdr_id:           form.sdr_id || null,
             sdr_email:        sdrUser?.email ?? null,
           },
-          headers: session?.access_token
-            ? { Authorization: `Bearer ${session.access_token}` }
-            : undefined,
+          headers: authHeaders,
+        })
+
+        // Sincroniza lead e card no DataCrazy CRM
+        void supabase.functions.invoke('sync-datacrazy', {
+          body: {
+            name:       capitalize(form.client),
+            email:      form.email,
+            phone:      form.phone || null,
+            team_uuid:  responsibleUser.team_id,
+          },
+          headers: authHeaders,
         })
       })
     }
