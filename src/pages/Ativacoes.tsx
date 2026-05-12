@@ -687,8 +687,10 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
                             <>
                               <button title="Editar"
                                 onClick={() => {
-                                  setForm({ ...a, email: a.email || '', phone: a.phone || '',
-                                    responsible: a.responsible, sdr_id: a.sdr_id || '' })
+                                  setForm({ ...EMPTY_FORM, client: a.client, email: a.email || '',
+                                    phone: a.phone || '', channel: a.channel, responsible: a.responsible,
+                                    date: a.date, sdr_id: a.sdr_id || '', notes: (a as any).notes || '',
+                                    images: [] })
                                   setModalEdit(a)
                                 }}
                                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--action)', padding: 4, borderRadius: 6 }}>
