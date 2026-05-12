@@ -251,7 +251,9 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
         const { error: upErr } = await supabase.storage
           .from('ativacoes-arquivos')
           .upload(path, file, { upsert: false })
-        if (!upErr) {
+        if (upErr) {
+          toast(`Erro ao enviar arquivo ${file.name}: ${upErr.message}`, 'error')
+        } else {
           const { data: urlData } = supabase.storage.from('ativacoes-arquivos').getPublicUrl(path)
           if (urlData?.publicUrl) imageUrls.push(urlData.publicUrl)
         }
