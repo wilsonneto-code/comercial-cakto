@@ -29,7 +29,7 @@ type DbTeam  = { id: string; name: string }
 type AuthUser = { id: string; name: string; role: string; team_id: string | null }
 
 const CHANNELS: ActivationChannel[] = ['Inbound', 'Outbound', 'Indicação']
-const EMPTY_FORM = { client: '', email: '', channel: 'Inbound', responsible: '', date: '', phone: '+55 ', sdr_id: '' }
+const EMPTY_FORM = { client: '', email: '', channel: 'Inbound', responsible: '', date: '', phone: '+55 ', sdr_id: '', notes: '', images: [] as File[] }
 const PER_PAGE = 5
 
 const DEFAULT_RANGE: DateRange = {
@@ -243,13 +243,29 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
       const sdrUser = form.sdr_id ? users.find(u => u.id === form.sdr_id) : null
       const teamName = teams.find(t => t.id === responsibleUser.team_id)?.name || ''
 
+      // Upload de imagens para o Supabase Storage
+      const imageUrls: string[] = []
+      for (const file of form.images) {
+        const ext  = file.name.split('.').pop()
+        const path = `${emailSanitized}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+        const { error: upErr } = await supabase.storage
+          .from('ativacoes-arquivos')
+          .upload(path, file, { upsert: false })
+        if (!upErr) {
+          const { data: urlData } = supabase.storage.from('ativacoes-arquivos').getPublicUrl(path)
+          if (urlData?.publicUrl) imageUrls.push(urlData.publicUrl)
+        }
+      }
+
       const row = {
         client: capitalize(form.client), email: emailSanitized, phone: form.phone || null,
         channel: form.channel as ActivationChannel, responsible: form.responsible,
         date: form.date, time,
-        sdr_id:   form.sdr_id || null,
-        sdr_nome: sdrUser?.name || null,
-        sem_sdr:  !form.sdr_id,
+        sdr_id:     form.sdr_id || null,
+        sdr_nome:   sdrUser?.name || null,
+        sem_sdr:    !form.sdr_id,
+        notes:      form.notes || null,
+        image_urls: imageUrls,
       }
       const { data, error } = await supabase.from('activations').insert(row).select().single()
       setIsSaving(false)
@@ -298,6 +314,8 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
             email:      form.email,
             phone:      form.phone || null,
             team_uuid:  responsibleUser.team_id,
+            notes:      form.notes || null,
+            image_urls: imageUrls,
           },
           headers: authHeaders,
         })
@@ -403,6 +421,52 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
           <input className="inp" value={form.phone} onChange={setF('phone')} placeholder="+55 11 99999-0000" />
         </Field>
       </div>
+
+      <Field label="Notas">
+        <textarea className="inp" rows={3} value={form.notes}
+          onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
+          placeholder="Observações sobre o cliente, contrato, produto…"
+          style={{ resize: 'vertical', fontSize: 13 }} />
+      </Field>
+
+      <Field label="Arquivos / Imagens">
+        <label style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: 6, padding: '16px 12px', border: '2px dashed var(--border)', borderRadius: 10,
+          cursor: 'pointer', background: 'var(--bg-card2)', transition: 'border-color .15s',
+        }}
+          onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--action)' }}
+          onDragLeave={e => { e.currentTarget.style.borderColor = 'var(--border)' }}
+          onDrop={e => {
+            e.preventDefault()
+            e.currentTarget.style.borderColor = 'var(--border)'
+            const files = Array.from(e.dataTransfer.files)
+            setForm(p => ({ ...p, images: [...p.images, ...files] }))
+          }}>
+          <input type="file" multiple accept="image/*,.pdf" style={{ display: 'none' }}
+            onChange={e => {
+              const files = Array.from(e.target.files ?? [])
+              setForm(p => ({ ...p, images: [...p.images, ...files] }))
+              e.target.value = ''
+            }} />
+          <span style={{ fontSize: 13, color: 'var(--text2)' }}>
+            Clique ou arraste arquivos aqui
+          </span>
+          <span style={{ fontSize: 11, color: 'var(--text2)' }}>Imagens ou PDF</span>
+        </label>
+        {form.images.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+            {form.images.map((file, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--bg-card2)',
+                border: '1px solid var(--border)', borderRadius: 8, padding: '4px 10px', fontSize: 12 }}>
+                <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
+                <button onClick={() => setForm(p => ({ ...p, images: p.images.filter((_, j) => j !== i) }))}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: 14, lineHeight: 1 }}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Field>
     </div>
   )
 

@@ -41,7 +41,7 @@ serve(async (req) => {
     new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } })
 
   try {
-    const { name, email, phone, team_uuid } = await req.json()
+    const { name, email, phone, team_uuid, notes, image_urls } = await req.json()
 
     // Busca API Key nas configurações do Supabase
     const supabase = createClient(
@@ -136,6 +136,20 @@ serve(async (req) => {
       })
       const created = await cRes.json()
       console.log(`[sync-datacrazy] Card criado em Cliente Ativo: ${created?.id}`)
+    }
+
+    // ── 5. Posta nota no lead ────────────────────────────────────────────────
+    const noteParts: string[] = []
+    if (notes) noteParts.push(notes)
+    if (image_urls?.length > 0) {
+      noteParts.push(`\n📎 Arquivos:\n${(image_urls as string[]).map((u: string) => u).join('\n')}`)
+    }
+    if (noteParts.length > 0) {
+      await fetch(`${BASE}/leads/${leadId}/notes`, {
+        method: 'POST', headers: h,
+        body: JSON.stringify({ content: noteParts.join('\n') }),
+      })
+      console.log(`[sync-datacrazy] Nota postada no lead ${leadId}`)
     }
 
     return json({ success: true, leadId })

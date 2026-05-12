@@ -54,18 +54,21 @@ export interface Database {
           id: string; client: string; email: string | null; phone: string | null
           channel: ActivationChannel; responsible: string; date: string; time: string | null
           sdr_id: string | null; sdr_nome: string | null; sem_sdr: boolean
+          notes: string | null; image_urls: string[]
           created_at: string; updated_at: string
         }
         Insert: {
           id?: string; client: string; email?: string | null; phone?: string | null
           channel: ActivationChannel; responsible: string; date: string; time?: string | null
           sdr_id?: string | null; sdr_nome?: string | null; sem_sdr?: boolean
+          notes?: string | null; image_urls?: string[]
           created_at?: string; updated_at?: string
         }
         Update: {
           id?: string; client?: string; email?: string | null; phone?: string | null
           channel?: ActivationChannel; responsible?: string; date?: string; time?: string | null
           sdr_id?: string | null; sdr_nome?: string | null; sem_sdr?: boolean
+          notes?: string | null; image_urls?: string[]
           updated_at?: string
         }
         Relationships: [
