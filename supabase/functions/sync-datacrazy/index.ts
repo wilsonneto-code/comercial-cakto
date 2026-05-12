@@ -16,21 +16,24 @@ const CORS = {
 const BASE = 'https://api.g1.datacrazy.io/api/v1'
 
 // team_uuid (Supabase) → pipeline Closer + stage "Cliente Ativo"
+// Time 01 = Victor Vieira  → Closer 1
+// Time 02 = Isaac           → Closer 3
+// Time 03 = Wilson Neto     → Closer 2
 const TEAM_PIPELINE: Record<string, { pipelineId: string; stageId: string; label: string }> = {
   '63d33c9a-fad3-4095-8be6-39f84dda7519': {
-    label:      'Time 01 → Closer 1',
+    label:      'Time 01 → Closer 1 (Victor)',
     pipelineId: '4d88436f-d761-4e34-b974-d7890273a829',
     stageId:    'f5faf1b5-0f76-40b2-8cb3-d8c2c127595f', // Cliente Ativo
   },
   'c37cfdfe-755c-428e-b132-13fd7c90ea7b': {
-    label:      'Time 02 → Closer 2',
-    pipelineId: '746ec7cc-ff48-4139-9b40-977e0540d875',
-    stageId:    '9b8e192e-8ae9-4b08-b89f-44592c43b1bd', // Cliente Ativo
-  },
-  '92f0c8fa-03c6-46e5-b97a-5ef544a9e183': {
-    label:      'Time 03 → Closer 3',
+    label:      'Time 02 → Closer 3 (Isaac)',
     pipelineId: '22150736-c65d-472a-b3e8-5b14373a881c',
     stageId:    'f7f0a07f-c08b-4ee0-a731-4e76f463b52d', // Cliente Ativo
+  },
+  '92f0c8fa-03c6-46e5-b97a-5ef544a9e183': {
+    label:      'Time 03 → Closer 2 (Wilson)',
+    pipelineId: '746ec7cc-ff48-4139-9b40-977e0540d875',
+    stageId:    '9b8e192e-8ae9-4b08-b89f-44592c43b1bd', // Cliente Ativo
   },
 }
 
