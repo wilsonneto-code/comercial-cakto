@@ -114,22 +114,21 @@ serve(async (req) => {
 
     if (!leadId) return json({ success: false, error: 'Falha ao criar/encontrar lead' }, 500)
 
-    // ── 4. Verifica se já existe card neste pipeline ─────────────────────────
-    const bRes = await fetch(
-      `${BASE}/businesses?leadId=${leadId}&pipelineId=${pipeline.pipelineId}&take=10`, { headers: h }
-    )
+    // ── 4. Busca businesses do lead e filtra pelo pipeline correto ───────────
+    // O filtro pipelineId na query não funciona na API — filtramos client-side
+    const bRes = await fetch(`${BASE}/businesses?leadId=${leadId}&take=100`, { headers: h })
     const bData = await bRes.json()
-    const existingBusiness = (bData.data ?? [])[0]
+    const existingBusiness = (bData.data ?? []).find(
+      (b: any) => b.stage?.pipeline?.id === pipeline.pipelineId
+    )
 
     if (existingBusiness) {
-      // Move para "Cliente Ativo"
-      await fetch(`${BASE}/businesses/actions/move`, {
+      const moveRes = await fetch(`${BASE}/businesses/actions/move`, {
         method: 'POST', headers: h,
         body: JSON.stringify({ ids: [existingBusiness.id], stageId: pipeline.stageId }),
       })
-      console.log(`[sync-datacrazy] Card movido para Cliente Ativo: ${existingBusiness.id}`)
+      console.log(`[sync-datacrazy] Card movido para Cliente Ativo: ${existingBusiness.id} | status: ${moveRes.status}`)
     } else {
-      // Cria card diretamente em "Cliente Ativo"
       const cRes = await fetch(`${BASE}/businesses`, {
         method: 'POST', headers: h,
         body: JSON.stringify({ leadId, stageId: pipeline.stageId }),
@@ -142,14 +141,14 @@ serve(async (req) => {
     const noteParts: string[] = []
     if (notes) noteParts.push(notes)
     if (image_urls?.length > 0) {
-      noteParts.push(`\n📎 Arquivos:\n${(image_urls as string[]).map((u: string) => u).join('\n')}`)
+      noteParts.push(`📎 Arquivos:\n${(image_urls as string[]).join('\n')}`)
     }
     if (noteParts.length > 0) {
-      await fetch(`${BASE}/leads/${leadId}/notes`, {
+      const noteRes = await fetch(`${BASE}/leads/${leadId}/notes`, {
         method: 'POST', headers: h,
-        body: JSON.stringify({ content: noteParts.join('\n') }),
+        body: JSON.stringify({ history: noteParts.join('\n\n') }),
       })
-      console.log(`[sync-datacrazy] Nota postada no lead ${leadId}`)
+      console.log(`[sync-datacrazy] Nota postada: ${noteRes.status}`)
     }
 
     return json({ success: true, leadId })
