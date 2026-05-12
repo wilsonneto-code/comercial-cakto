@@ -9,8 +9,9 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: false,   // sem OAuth redirect — evita SIGNED_IN duplo
+    detectSessionInUrl: false,
     storageKey: 'comercial-auth-token',
-    flowType: 'implicit',        // sem Web Locks — adequado para SPA email/senha
+    flowType: 'implicit',
+    lock: (_name: string, _acquireTimeout: number, fn: () => Promise<string>) => fn(),
   },
 })
