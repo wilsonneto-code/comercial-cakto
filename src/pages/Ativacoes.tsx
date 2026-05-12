@@ -401,6 +401,70 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
 
   // ── Form fields (variable — evita unmount no re-render) ───────────────────
   const noTeamWarning = form.responsible && !responsibleTeamId
+  // Campos de edição de dados do cliente (sem Responsável/SDR)
+  const clientFieldsJSX = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <Field label="Nome do Cliente" required>
+        <input className="inp" value={form.client} onChange={setF('client')}
+          onBlur={e => setForm(p => ({ ...p, client: capitalize(e.target.value) }))} placeholder="Nome Completo" />
+      </Field>
+      <Field label="Email" required>
+        <input className="inp" type="email" value={form.email} onChange={setF('email')} placeholder="cliente@email.com" />
+      </Field>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Data de Ativação" required>
+          <input className="inp" type="date" value={form.date} onChange={setF('date')} />
+        </Field>
+        <Field label="Telefone">
+          <input className="inp" value={form.phone} onChange={setF('phone')} placeholder="+55 11 99999-0000" />
+        </Field>
+      </div>
+      <Field label="Canal">
+        <Sel value={form.channel} onChange={v => setForm(p => ({ ...p, channel: v }))}
+          options={CHANNELS} placeholder="" />
+      </Field>
+      <Field label="Notas">
+        <textarea className="inp" rows={3} value={form.notes}
+          onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
+          placeholder="Observações sobre o cliente, contrato, produto…"
+          style={{ resize: 'vertical', fontSize: 13 }} />
+      </Field>
+      <Field label="Arquivos / Imagens">
+        <label style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: 6, padding: '16px 12px', border: '2px dashed var(--border)', borderRadius: 10,
+          cursor: 'pointer', background: 'var(--bg-card2)', transition: 'border-color .15s',
+        }}
+          onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--action)' }}
+          onDragLeave={e => { e.currentTarget.style.borderColor = 'var(--border)' }}
+          onDrop={e => {
+            e.preventDefault(); e.currentTarget.style.borderColor = 'var(--border)'
+            setForm(p => ({ ...p, images: [...p.images, ...Array.from(e.dataTransfer.files)] }))
+          }}>
+          <input type="file" multiple accept="image/*,.pdf" style={{ display: 'none' }}
+            onChange={e => {
+              setForm(p => ({ ...p, images: [...p.images, ...Array.from(e.target.files ?? [])] }))
+              e.target.value = ''
+            }} />
+          <span style={{ fontSize: 13, color: 'var(--text2)' }}>Clique ou arraste arquivos aqui</span>
+          <span style={{ fontSize: 11, color: 'var(--text2)' }}>Imagens ou PDF</span>
+        </label>
+        {form.images.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+            {form.images.map((file, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--bg-card2)',
+                border: '1px solid var(--border)', borderRadius: 8, padding: '4px 10px', fontSize: 12 }}>
+                <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
+                <button onClick={() => setForm(p => ({ ...p, images: p.images.filter((_, j) => j !== i) }))}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: 14, lineHeight: 1 }}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Field>
+    </div>
+  )
+
   const formFieldsJSX = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <Field label="Nome do Cliente" required>
@@ -723,19 +787,19 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
                               <UserCheck size={16} />
                             </button>
                           </>
+                          <button title="Editar"
+                            onClick={() => {
+                              setForm({ ...EMPTY_FORM, client: a.client, email: a.email || '',
+                                phone: a.phone || '', channel: a.channel, responsible: a.responsible,
+                                date: a.date, sdr_id: a.sdr_id || '', notes: (a as any).notes || '',
+                                images: [] })
+                              setModalEdit(a)
+                            }}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--action)', padding: 4, borderRadius: 6 }}>
+                            <Edit size={16} />
+                          </button>
                           {isAdmin && (
                             <>
-                              <button title="Editar"
-                                onClick={() => {
-                                  setForm({ ...EMPTY_FORM, client: a.client, email: a.email || '',
-                                    phone: a.phone || '', channel: a.channel, responsible: a.responsible,
-                                    date: a.date, sdr_id: a.sdr_id || '', notes: (a as any).notes || '',
-                                    images: [] })
-                                  setModalEdit(a)
-                                }}
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--action)', padding: 4, borderRadius: 6 }}>
-                                <Edit size={16} />
-                              </button>
                               <button title="Excluir" onClick={() => setModalDel(a.id)}
                                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 4, borderRadius: 6 }}>
                                 <Trash2 size={16} />
@@ -780,12 +844,12 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
           {formFieldsJSX}
         </Modal>
 
-        <Modal open={!!modalEdit} onClose={() => setModalEdit(null)} title="Editar Ativação" width={520}
+        <Modal open={!!modalEdit} onClose={() => setModalEdit(null)} title="Editar Dados do Cliente" width={520}
           footer={<>
             <Button variant="secondary" onClick={() => setModalEdit(null)}>Cancelar</Button>
             <Button onClick={save} disabled={isSaving}>{isSaving ? 'Salvando…' : 'Salvar'}</Button>
           </>}>
-          {formFieldsJSX}
+          {isAdmin ? formFieldsJSX : clientFieldsJSX}
         </Modal>
 
         <Sheet open={!!sheetView} onClose={() => setSheetView(null)} title="Detalhes da Ativação">
