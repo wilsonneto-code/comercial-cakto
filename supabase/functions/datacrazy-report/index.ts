@@ -180,9 +180,12 @@ serve(async (req) => {
     const { rows: allBusinesses, declaredTotal } = await fetchAllPages(`${BASE}/businesses`, h)
     console.log(`[datacrazy-report] businesses fetched=${allBusinesses.length} declared=${declaredTotal}`)
 
-    // 5. Agrupa por pipeline — sem deduplicação
+    // 5. Agrupa por pipeline — filtra apenas a partir de abril/2026 e sem deduplicação
+    const FROM_DATE = new Date('2026-04-01T00:00:00.000Z')
     const businessesByPipeline = new Map<string, any[]>()
     for (const b of allBusinesses) {
+      const movedAt = new Date(b.lastMovedAt ?? b.createdAt ?? 0)
+      if (movedAt < FROM_DATE) continue
       const pid = b.stage?.pipeline?.id
         ?? stageToPipeline.get(b.stageId)
         ?? b.pipelineId
