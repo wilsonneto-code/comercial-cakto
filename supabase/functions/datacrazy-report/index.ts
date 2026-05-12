@@ -13,9 +13,14 @@ const CORS = {
 const BASE = 'https://api.g1.datacrazy.io/api/v1'
 
 const PIPELINES = [
-  { id: '4d88436f-d761-4e34-b974-d7890273a829', name: 'Closer 1', closer: 'Victor Vieira' },
-  { id: '746ec7cc-ff48-4139-9b40-977e0540d875', name: 'Closer 2', closer: 'Wilson Neto' },
-  { id: '22150736-c65d-472a-b3e8-5b14373a881c', name: 'Closer 3', closer: 'Isaac' },
+  // Closers
+  { id: '4d88436f-d761-4e34-b974-d7890273a829', name: 'Closer 1', closer: 'Victor Vieira', type: 'closer' },
+  { id: '746ec7cc-ff48-4139-9b40-977e0540d875', name: 'Closer 2', closer: 'Wilson Neto',  type: 'closer' },
+  { id: '22150736-c65d-472a-b3e8-5b14373a881c', name: 'Closer 3', closer: 'Isaac',         type: 'closer' },
+  // SDR — Campanha Iphone
+  { id: '79319246-8852-430c-8b62-b5c10a9dd6f0', name: 'Campanha Iphone 1', closer: 'Time 01', type: 'sdr' },
+  { id: '201d3917-dbd7-4bb5-bb27-a703f9a964a0', name: 'Campanha Iphone 2', closer: 'Time 02', type: 'sdr' },
+  { id: '33a4f440-60f6-4cbc-982e-2321446948e7', name: 'Campanha Iphone 3', closer: 'Time 03', type: 'sdr' },
 ]
 
 async function fetchAllPages(url: string, headers: Record<string, string>) {
@@ -79,6 +84,7 @@ serve(async (req) => {
       return {
         pipeline: pipeline.name,
         closer: pipeline.closer,
+        type: pipeline.type,
         pipelineId: pipeline.id,
         stages: stages.sort((a, b) => a.index - b.index).map((s: any) => ({
           id: s.id, name: s.name, index: s.index,

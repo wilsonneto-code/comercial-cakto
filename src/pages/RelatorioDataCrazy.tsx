@@ -8,7 +8,8 @@ import { supabase } from '@/lib/supabase/client'
 import { Loader2, RefreshCw } from 'lucide-react'
 
 const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
-const PIPELINE_COLORS = ['#2563eb', '#7c3aed', '#059669']
+const PIPELINE_COLORS  = ['#2563eb', '#7c3aed', '#059669']
+const SDR_COLORS       = ['#0891b2', '#d97706', '#be185d']
 const STAGE_COLORS = [
   '#2563eb','#7c3aed','#059669','#d97706','#dc2626',
   '#0891b2','#65a30d','#9333ea','#ea580c','#0284c7',
@@ -16,7 +17,7 @@ const STAGE_COLORS = [
 
 type Stage      = { id: string; name: string; index: number; count: number }
 type Business   = { id: string; leadId: string; leadName: string; leadEmail: string; stageId: string; stageName: string; createdAt: string; updatedAt: string; total: number }
-type Pipeline   = { pipeline: string; closer: string; pipelineId: string; stages: Stage[]; businesses: Business[] }
+type Pipeline   = { pipeline: string; closer: string; type: string; pipelineId: string; stages: Stage[]; businesses: Business[] }
 type ReportData = { pipelines: Pipeline[]; fetchedAt: string }
 
 const BRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
@@ -36,7 +37,7 @@ function ReportContent() {
   const [error, setError]         = useState('')
   const [selectedMonth, setSelectedMonth] = useState<string>('all')
   const [selectedPipeline, setSelectedPipeline] = useState<string>('all')
-  const [activeTab, setActiveTab] = useState<'funil' | 'negocios' | 'desempenho'>('funil')
+  const [activeTab, setActiveTab] = useState<'funil' | 'sdr' | 'negocios' | 'desempenho'>('funil')
 
   async function load() {
     setIsLoading(true); setError('')
@@ -61,9 +62,14 @@ function ReportContent() {
     })
   }
 
-  const pipelines = data?.pipelines.filter(p =>
+  const allPipelines = data?.pipelines ?? []
+  const closerPipelines = allPipelines.filter(p => p.type === 'closer').filter(p =>
     selectedPipeline === 'all' || p.pipeline === selectedPipeline
-  ) ?? []
+  )
+  const sdrPipelines = allPipelines.filter(p => p.type === 'sdr').filter(p =>
+    selectedPipeline === 'all' || p.pipeline === selectedPipeline
+  )
+  const pipelines = closerPipelines
 
   // KPIs globais
   const allBiz      = pipelines.flatMap(p => filteredBusinesses(p))
@@ -116,8 +122,13 @@ function ReportContent() {
             {/* Filtro de pipeline */}
             <select value={selectedPipeline} onChange={e => setSelectedPipeline(e.target.value)}
               style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text)', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer' }}>
-              <option value="all">Todos os closers</option>
-              {data?.pipelines.map(p => <option key={p.pipeline} value={p.pipeline}>{p.pipeline} — {p.closer}</option>)}
+              <option value="all">Todos</option>
+              <optgroup label="Closers">
+                {data?.pipelines.filter(p => p.type === 'closer').map(p => <option key={p.pipeline} value={p.pipeline}>{p.pipeline} — {p.closer}</option>)}
+              </optgroup>
+              <optgroup label="SDR">
+                {data?.pipelines.filter(p => p.type === 'sdr').map(p => <option key={p.pipeline} value={p.pipeline}>{p.pipeline}</option>)}
+              </optgroup>
             </select>
             <button onClick={load} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text2)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13 }}>
               <RefreshCw size={14} /> Atualizar
@@ -154,7 +165,7 @@ function ReportContent() {
 
         {/* ── Tabs ──────────────────────────────────────────────────────────── */}
         <div style={{ display: 'flex', gap: 4, background: 'var(--bg-card2)', borderRadius: 10, padding: 4, marginBottom: 20, width: 'fit-content' }}>
-          {([['funil','Funil'], ['negocios','Negócios'], ['desempenho','Desempenho']] as const).map(([k, l]) => (
+          {([['funil','Funil Closers'], ['sdr','Funil SDR'], ['negocios','Negócios'], ['desempenho','Desempenho']] as const).map(([k, l]) => (
             <button key={k} onClick={() => setActiveTab(k)} style={{
               padding: '7px 18px', borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
               background: activeTab === k ? 'var(--action)' : 'transparent',
@@ -229,6 +240,88 @@ function ReportContent() {
           </div>
         )}
 
+        {/* ── ABA: SDR ──────────────────────────────────────────────────────── */}
+        {activeTab === 'sdr' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+            {/* KPIs SDR */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))', gap: 12 }}>
+              {sdrPipelines.map((p, i) => {
+                const biz = filteredBusinesses(p)
+                const qualificados = biz.filter(b => b.stageName === 'Lead Qualificado' || b.stageName === 'Call Agendada').length
+                const perdidos = biz.filter(b => b.stageName.toLowerCase().includes('perdido') || b.stageName.toLowerCase().includes('desqualificado')).length
+                const taxa = biz.length > 0 ? Math.round((qualificados / biz.length) * 100) : 0
+                return (
+                  <div key={p.pipeline} style={{ background: 'var(--bg-card)', border: `1px solid ${SDR_COLORS[i]}`, borderRadius: 12, padding: 16 }}>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: SDR_COLORS[i] }}>{biz.length}</div>
+                    <div style={{ fontSize: 12, color: SDR_COLORS[i], fontWeight: 600, marginTop: 2 }}>{p.pipeline}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>{qualificados} qualif. · {taxa}% taxa · {perdidos} perdidos</div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Funil por campanha */}
+            {sdrPipelines.map((p, pi) => {
+              const biz = filteredBusinesses(p)
+              const maxCount = Math.max(...p.stages.map(s => biz.filter(b => b.stageId === s.id).length), 1)
+              return (
+                <div key={p.pipeline} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: SDR_COLORS[pi] }} />
+                    <span style={{ fontWeight: 700, fontSize: 15 }}>{p.pipeline}</span>
+                    <span style={{ fontSize: 13, color: 'var(--text2)' }}>{biz.length} leads</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {p.stages.map((s, si) => {
+                      const cnt = biz.filter(b => b.stageId === s.id).length
+                      if (cnt === 0 && selectedMonth !== 'all') return null
+                      const pct = maxCount > 0 ? (cnt / maxCount) * 100 : 0
+                      const isQual = s.name === 'Lead Qualificado' || s.name === 'Call Agendada'
+                      const isPerdido = s.name.toLowerCase().includes('perdido') || s.name.toLowerCase().includes('desqualificado')
+                      const barColor = isQual ? 'var(--green)' : isPerdido ? 'var(--red)' : SDR_COLORS[pi]
+                      return (
+                        <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <div style={{ width: 180, fontSize: 12, textAlign: 'right', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: isQual ? 'var(--green)' : isPerdido ? 'var(--red)' : 'var(--text2)', fontWeight: isQual ? 700 : 400 }}>
+                            {s.name}
+                          </div>
+                          <div style={{ flex: 1, height: 28, background: 'var(--bg-card2)', borderRadius: 6, overflow: 'hidden' }}>
+                            <div style={{ height: '100%', width: `${Math.max(pct, cnt > 0 ? 2 : 0)}%`, background: barColor, borderRadius: 6, transition: 'width .4s', display: 'flex', alignItems: 'center', paddingLeft: 8 }}>
+                              {cnt > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }}>{cnt}</span>}
+                            </div>
+                          </div>
+                          <div style={{ width: 32, fontSize: 13, fontWeight: 700, color: barColor, textAlign: 'right' }}>{cnt}</div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+
+            {/* Donut SDR */}
+            {sdrPipelines.length > 1 && (
+              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 20 }}>Distribuição entre Campanhas</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 40, flexWrap: 'wrap' }}>
+                  <DonutChart size={160} thickness={28} data={sdrPipelines.map((p, i) => ({
+                    label: p.pipeline, value: filteredBusinesses(p).length, color: SDR_COLORS[i],
+                  }))} />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {sdrPipelines.map((p, i) => (
+                      <div key={p.pipeline} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ width: 12, height: 12, borderRadius: 3, background: SDR_COLORS[i], flexShrink: 0 }} />
+                        <span style={{ fontSize: 13, fontWeight: 600 }}>{p.pipeline}</span>
+                        <span style={{ fontSize: 13, color: 'var(--text2)' }}>{filteredBusinesses(p).length} leads</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── ABA: NEGÓCIOS ─────────────────────────────────────────────────── */}
         {activeTab === 'negocios' && (
           <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
@@ -242,17 +335,19 @@ function ReportContent() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pipelines.flatMap((p, pi) =>
+                  {[...pipelines, ...sdrPipelines].flatMap((p, pi) =>
                     filteredBusinesses(p)
                       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
                       .map((b, i) => {
                         const isAtivo = b.stageName === 'Cliente Ativo' || b.stageName === 'Cliente Ativo (Campanha)'
                         const isPerdido = b.stageName.toLowerCase().includes('perdido') || b.stageName.toLowerCase().includes('desqualificado')
+                        const isSdr = p.type === 'sdr'
+                        const pColor = isSdr ? SDR_COLORS[pi % 3] : PIPELINE_COLORS[pi % 3]
                         const stageColor = isAtivo ? 'var(--green)' : isPerdido ? 'var(--red)' : 'var(--text2)'
                         return (
                           <tr key={b.id} style={{ background: i % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-card2)' }}>
                             <td style={{ padding: '9px 16px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
-                              <span style={{ fontSize: 11, fontWeight: 700, color: PIPELINE_COLORS[pi], background: `color-mix(in srgb, ${PIPELINE_COLORS[pi]} 12%, var(--bg-card2))`, borderRadius: 6, padding: '2px 8px' }}>{p.pipeline}</span>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: pColor, background: `color-mix(in srgb, ${pColor} 12%, var(--bg-card2))`, borderRadius: 6, padding: '2px 8px' }}>{p.pipeline}{isSdr ? ' (SDR)' : ''}</span>
                             </td>
                             <td style={{ padding: '9px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.leadName || '—'}</td>
                             <td style={{ padding: '9px 16px', borderBottom: '1px solid var(--border)', color: 'var(--text2)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.leadEmail || '—'}</td>
