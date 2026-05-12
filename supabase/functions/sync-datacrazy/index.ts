@@ -131,7 +131,12 @@ serve(async (req) => {
         method: 'PATCH', headers: h,
         body: JSON.stringify({ stageId: pipeline.stageId }),
       })
-      console.log(`[sync-datacrazy] Card existente movido para Cliente Ativo: ${existingBusiness.id} | status: ${moveRes.status}`)
+      const moveBody = await moveRes.json()
+      if (!moveRes.ok) {
+        console.error(`[sync-datacrazy] Falha ao mover card: status=${moveRes.status}`, JSON.stringify(moveBody))
+        return json({ success: false, error: `Falha ao mover card: ${moveRes.status} ${JSON.stringify(moveBody)}` }, 500)
+      }
+      console.log(`[sync-datacrazy] Card existente movido para Cliente Ativo: ${existingBusiness.id}`)
     } else {
       // Não existe → cria novo card diretamente em Cliente Ativo
       const cRes = await fetch(`${BASE}/businesses`, {
@@ -139,6 +144,10 @@ serve(async (req) => {
         body: JSON.stringify({ leadId, stageId: pipeline.stageId }),
       })
       const created = await cRes.json()
+      if (!cRes.ok) {
+        console.error(`[sync-datacrazy] Falha ao criar card: status=${cRes.status}`, JSON.stringify(created))
+        return json({ success: false, error: `Falha ao criar card: ${cRes.status} ${JSON.stringify(created)}` }, 500)
+      }
       console.log(`[sync-datacrazy] Novo card criado em Cliente Ativo: ${created?.id}`)
     }
 
