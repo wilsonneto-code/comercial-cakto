@@ -15,12 +15,15 @@ const STAGE_COLORS = [
   '#0891b2','#65a30d','#9333ea','#ea580c','#0284c7',
 ]
 
-type Stage      = { id: string; name: string; index: number; count: number }
-type Business   = { id: string; leadId: string; leadName: string; leadEmail: string; stageId: string; stageName: string; createdAt: string; updatedAt: string; lastMovedAt: string; total: number }
+type Stage    = { id: string; name: string; index: number; count: number }
+type Activity = { id: string; title: string; type: string; createdAt: string; stageId: string | null; stageName: string }
+type Business = {
+  id: string; leadId: string; leadName: string; leadEmail: string
+  stageId: string; stageName: string; createdAt: string; updatedAt: string
+  lastMovedAt: string; total: number; activities?: Activity[]
+}
 type Pipeline   = { pipeline: string; closer: string; type: string; pipelineId: string; stages: Stage[]; businesses: Business[] }
 type ReportData = { pipelines: Pipeline[]; fetchedAt: string }
-
-const BRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 
 export default function RelatorioDataCrazy() {
   const { user, loading } = useAuth()
@@ -31,7 +34,6 @@ export default function RelatorioDataCrazy() {
 }
 
 function ReportContent() {
-  const today = new Date()
   const [data, setData]           = useState<ReportData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError]         = useState('')
@@ -49,21 +51,31 @@ function ReportContent() {
 
   useEffect(() => { load() }, [])
 
-  // Meses disponíveis baseados em lastMovedAt (movimentação, não criação)
+  // Meses disponíveis baseados em lastMovedAt
   const availableMonths = data ? [...new Set(
     data.pipelines.flatMap(p => p.businesses.map(b => (b.lastMovedAt ?? b.createdAt)?.slice(0, 7) ?? ''))
   )].filter(Boolean).sort((a, b) => b.localeCompare(a)) : []
 
-  // Filtra businesses por mês de movimentação (lastMovedAt)
+  // Negócios filtrados por mês (lastMovedAt) — usado na tabela e KPIs
   function filteredBusinesses(p: Pipeline) {
-    return p.businesses.filter(b => {
-      if (selectedMonth === 'all') return true
-      const moved = b.lastMovedAt ?? b.createdAt ?? ''
-      return moved.startsWith(selectedMonth)
-    })
+    if (selectedMonth === 'all') return p.businesses
+    return p.businesses.filter(b => (b.lastMovedAt ?? b.createdAt ?? '').startsWith(selectedMonth))
   }
 
-  const allPipelines = data?.pipelines ?? []
+  // Para o FUNIL: conta movimentos por etapa no mês selecionado
+  // Cada negócio que foi movido para uma etapa naquele mês conta como 1 movimento naquela etapa
+  // SDR permite repetição do mesmo lead em etapas diferentes (lastMovedAt por negócio)
+  function stageMovements(p: Pipeline, stageId: string): number {
+    if (selectedMonth === 'all') {
+      return p.businesses.filter(b => b.stageId === stageId).length
+    }
+    return p.businesses.filter(b =>
+      b.stageId === stageId &&
+      (b.lastMovedAt ?? b.createdAt ?? '').startsWith(selectedMonth)
+    ).length
+  }
+
+  const allPipelines    = data?.pipelines ?? []
   const closerPipelines = allPipelines.filter(p => p.type === 'closer').filter(p =>
     selectedPipeline === 'all' || p.pipeline === selectedPipeline
   )
@@ -72,12 +84,13 @@ function ReportContent() {
   )
   const pipelines = closerPipelines
 
-  // KPIs globais
-  const allBiz      = pipelines.flatMap(p => filteredBusinesses(p))
-  const totalDeals  = allBiz.length
-  const clienteAtivo = allBiz.filter(b => b.stageName === 'Cliente Ativo' || b.stageName === 'Cliente Ativo (Campanha)').length
-  const perdidos    = allBiz.filter(b => b.stageName.toLowerCase().includes('perdido') || b.stageName.toLowerCase().includes('desqualificado')).length
-  const taxaConv    = totalDeals > 0 ? Math.round((clienteAtivo / totalDeals) * 100) : 0
+  // KPIs globais (baseados em todos os negócios sem filtro de mês)
+  const allBizTotal  = pipelines.flatMap(p => p.businesses)
+  const allBizFiltered = pipelines.flatMap(p => filteredBusinesses(p))
+  const totalDeals   = allBizTotal.length
+  const clienteAtivo = allBizTotal.filter(b => b.stageName === 'Cliente Ativo' || b.stageName === 'Cliente Ativo (Campanha)').length
+  const perdidos     = allBizTotal.filter(b => b.stageName.toLowerCase().includes('perdido') || b.stageName.toLowerCase().includes('desqualificado')).length
+  const taxaConv     = totalDeals > 0 ? Math.round((clienteAtivo / totalDeals) * 100) : 0
 
   if (isLoading) return (
     <>
@@ -109,9 +122,13 @@ function ReportContent() {
 
         {/* ── Cabeçalho ─────────────────────────────────────────────────────── */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-          <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-.02em' }}>Relatório de Pipeline</h1>
+          <div>
+            <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-.02em', marginBottom: 2 }}>Relatório de Pipeline</h1>
+            <div style={{ fontSize: 13, color: 'var(--text2)' }}>
+              {selectedMonth === 'all' ? 'Todos os movimentos' : `Movimentos em ${MONTHS[Number(selectedMonth.split('-')[1]) - 1]} ${selectedMonth.split('-')[0]}`}
+            </div>
+          </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            {/* Filtro de mês */}
             <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}
               style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text)', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer' }}>
               <option value="all">Todos os meses</option>
@@ -120,7 +137,6 @@ function ReportContent() {
                 return <option key={m} value={m}>{MONTHS[mo - 1]} {y}</option>
               })}
             </select>
-            {/* Filtro de pipeline */}
             <select value={selectedPipeline} onChange={e => setSelectedPipeline(e.target.value)}
               style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text)', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer' }}>
               <option value="all">Todos</option>
@@ -140,25 +156,27 @@ function ReportContent() {
         {/* ── KPIs Globais ──────────────────────────────────────────────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))', gap: 12, marginBottom: 24 }}>
           {[
-            { label: 'Total de Negócios', value: totalDeals,   color: 'var(--text)' },
-            { label: 'Cliente Ativo',     value: clienteAtivo, color: 'var(--green)' },
+            { label: 'Total de Negócios', value: totalDeals,    color: 'var(--text)' },
+            { label: 'Cliente Ativo',     value: clienteAtivo,  color: 'var(--green)' },
             { label: 'Taxa de Conversão', value: `${taxaConv}%`, color: taxaConv >= 30 ? 'var(--green)' : taxaConv >= 15 ? 'var(--orange)' : 'var(--red)' },
-            { label: 'Perdidos/Desqualif',value: perdidos,     color: 'var(--red)' },
+            { label: 'Perdidos/Desqualif',value: perdidos,      color: 'var(--red)' },
           ].map(k => (
             <div key={k.label} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
               <div style={{ fontSize: 28, fontWeight: 800, color: k.color }}>{k.value}</div>
               <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>{k.label}</div>
             </div>
           ))}
-          {/* KPI por pipeline */}
           {pipelines.map((p, i) => {
-            const biz = filteredBusinesses(p)
-            const ativo = biz.filter(b => b.stageName === 'Cliente Ativo' || b.stageName === 'Cliente Ativo (Campanha)').length
+            const ativo = p.businesses.filter(b => b.stageName === 'Cliente Ativo' || b.stageName === 'Cliente Ativo (Campanha)').length
+            const movMes = selectedMonth !== 'all' ? filteredBusinesses(p).length : null
             return (
               <div key={p.pipeline} style={{ background: 'var(--bg-card)', border: `1px solid ${PIPELINE_COLORS[i]}`, borderRadius: 12, padding: 16 }}>
-                <div style={{ fontSize: 24, fontWeight: 800, color: PIPELINE_COLORS[i] }}>{biz.length}</div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: PIPELINE_COLORS[i] }}>{p.businesses.length}</div>
                 <div style={{ fontSize: 12, color: PIPELINE_COLORS[i], fontWeight: 600, marginTop: 2 }}>{p.pipeline}</div>
-                <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>{ativo} ativos · {p.closer.split(' ')[0]}</div>
+                <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>
+                  {ativo} ativos · {p.closer.split(' ')[0]}
+                  {movMes !== null && <> · <span style={{ color: PIPELINE_COLORS[i] }}>{movMes} no mês</span></>}
+                </div>
               </div>
             )
           })}
@@ -175,41 +193,44 @@ function ReportContent() {
           ))}
         </div>
 
-        {/* ── ABA: FUNIL ────────────────────────────────────────────────────── */}
+        {/* ── ABA: FUNIL CLOSERS ────────────────────────────────────────────── */}
         {activeTab === 'funil' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             {pipelines.map((p, pi) => {
-              const biz = filteredBusinesses(p)
-              const maxCount = Math.max(...p.stages.map(s => s.count), 1)
+              const stagesWithCount = p.stages.map(s => ({
+                ...s,
+                movements: stageMovements(p, s.id),
+              }))
+              const maxCount = Math.max(...stagesWithCount.map(s => s.movements), 1)
+              const totalMovements = stagesWithCount.reduce((acc, s) => acc + s.movements, 0)
+
               return (
                 <div key={p.pipeline} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
                     <div style={{ width: 10, height: 10, borderRadius: '50%', background: PIPELINE_COLORS[pi] }} />
                     <span style={{ fontWeight: 700, fontSize: 15 }}>{p.pipeline} — {p.closer}</span>
-                    <span style={{ fontSize: 13, color: 'var(--text2)' }}>{biz.length} negócios</span>
+                    <span style={{ fontSize: 13, color: 'var(--text2)' }}>
+                      {totalMovements} {selectedMonth !== 'all' ? 'movimentos no mês' : 'negócios no total'}
+                    </span>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {p.stages.filter(s => {
-                      // Conta deals filtrados por mês neste stage
-                      const cnt = biz.filter(b => b.stageId === s.id).length
-                      return cnt > 0 || selectedMonth === 'all'
-                    }).map((s, si) => {
-                      const cnt = biz.filter(b => b.stageId === s.id).length
-                      const pct = maxCount > 0 ? (cnt / maxCount) * 100 : 0
-                      const isAtivo = s.name === 'Cliente Ativo' || s.name === 'Cliente Ativo (Campanha)'
+                    {stagesWithCount.filter(s => s.movements > 0 || selectedMonth === 'all').map((s, si) => {
+                      const pct = maxCount > 0 ? (s.movements / maxCount) * 100 : 0
+                      const isAtivo   = s.name === 'Cliente Ativo' || s.name === 'Cliente Ativo (Campanha)'
                       const isPerdido = s.name.toLowerCase().includes('perdido') || s.name.toLowerCase().includes('desqualificado')
-                      const barColor = isAtivo ? 'var(--green)' : isPerdido ? 'var(--red)' : STAGE_COLORS[si % STAGE_COLORS.length]
+                      const barColor  = isAtivo ? 'var(--green)' : isPerdido ? 'var(--red)' : STAGE_COLORS[si % STAGE_COLORS.length]
                       return (
                         <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                          <div style={{ width: 160, fontSize: 12, color: 'var(--text2)', textAlign: 'right', flexShrink: 0, fontWeight: isAtivo ? 700 : 400, color: isAtivo ? 'var(--green)' : isPerdido ? 'var(--red)' : 'var(--text2)' }}>
+                          <div style={{ width: 160, fontSize: 12, textAlign: 'right', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            fontWeight: isAtivo ? 700 : 400, color: isAtivo ? 'var(--green)' : isPerdido ? 'var(--red)' : 'var(--text2)' }}>
                             {s.name}
                           </div>
                           <div style={{ flex: 1, height: 28, background: 'var(--bg-card2)', borderRadius: 6, overflow: 'hidden' }}>
-                            <div style={{ height: '100%', width: `${Math.max(pct, cnt > 0 ? 2 : 0)}%`, background: barColor, borderRadius: 6, transition: 'width .4s', display: 'flex', alignItems: 'center', paddingLeft: 8 }}>
-                              {cnt > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }}>{cnt}</span>}
+                            <div style={{ height: '100%', width: `${Math.max(pct, s.movements > 0 ? 2 : 0)}%`, background: barColor, borderRadius: 6, transition: 'width .4s', display: 'flex', alignItems: 'center', paddingLeft: 8 }}>
+                              {s.movements > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }}>{s.movements}</span>}
                             </div>
                           </div>
-                          <div style={{ width: 32, fontSize: 13, fontWeight: 700, color: barColor, textAlign: 'right' }}>{cnt}</div>
+                          <div style={{ width: 32, fontSize: 13, fontWeight: 700, color: barColor, textAlign: 'right' }}>{s.movements}</div>
                         </div>
                       )
                     })}
@@ -218,20 +239,23 @@ function ReportContent() {
               )
             })}
 
-            {/* Donut por pipeline */}
             {pipelines.length > 1 && (
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
                 <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 20 }}>Distribuição por Pipeline</div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 40, flexWrap: 'wrap' }}>
                   <DonutChart size={160} thickness={28} data={pipelines.map((p, i) => ({
-                    label: p.pipeline, value: filteredBusinesses(p).length, color: PIPELINE_COLORS[i],
+                    label: p.pipeline,
+                    value: selectedMonth !== 'all' ? filteredBusinesses(p).length : p.businesses.length,
+                    color: PIPELINE_COLORS[i],
                   }))} />
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {pipelines.map((p, i) => (
                       <div key={p.pipeline} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ width: 12, height: 12, borderRadius: 3, background: PIPELINE_COLORS[i], flexShrink: 0 }} />
                         <span style={{ fontSize: 13, fontWeight: 600 }}>{p.pipeline}</span>
-                        <span style={{ fontSize: 13, color: 'var(--text2)' }}>{p.closer} — {filteredBusinesses(p).length} negócios</span>
+                        <span style={{ fontSize: 13, color: 'var(--text2)' }}>
+                          {p.closer} — {selectedMonth !== 'all' ? filteredBusinesses(p).length : p.businesses.length} negócios
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -244,8 +268,6 @@ function ReportContent() {
         {/* ── ABA: SDR ──────────────────────────────────────────────────────── */}
         {activeTab === 'sdr' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-
-            {/* KPIs SDR */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))', gap: 12 }}>
               {sdrPipelines.map((p, i) => {
                 const biz = filteredBusinesses(p)
@@ -254,7 +276,9 @@ function ReportContent() {
                 const taxa = biz.length > 0 ? Math.round((qualificados / biz.length) * 100) : 0
                 return (
                   <div key={p.pipeline} style={{ background: 'var(--bg-card)', border: `1px solid ${SDR_COLORS[i]}`, borderRadius: 12, padding: 16 }}>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: SDR_COLORS[i] }}>{biz.length}</div>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: SDR_COLORS[i] }}>
+                      {selectedMonth !== 'all' ? biz.length : p.businesses.length}
+                    </div>
                     <div style={{ fontSize: 12, color: SDR_COLORS[i], fontWeight: 600, marginTop: 2 }}>{p.pipeline}</div>
                     <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>{qualificados} qualif. · {taxa}% taxa · {perdidos} perdidos</div>
                   </div>
@@ -262,36 +286,42 @@ function ReportContent() {
               })}
             </div>
 
-            {/* Funil por campanha */}
             {sdrPipelines.map((p, pi) => {
-              const biz = filteredBusinesses(p)
-              const maxCount = Math.max(...p.stages.map(s => biz.filter(b => b.stageId === s.id).length), 1)
+              const stagesWithCount = p.stages.map(s => ({
+                ...s,
+                movements: stageMovements(p, s.id),
+              }))
+              const maxCount = Math.max(...stagesWithCount.map(s => s.movements), 1)
+              const totalMovements = stagesWithCount.reduce((acc, s) => acc + s.movements, 0)
+
               return (
                 <div key={p.pipeline} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
                     <div style={{ width: 10, height: 10, borderRadius: '50%', background: SDR_COLORS[pi] }} />
                     <span style={{ fontWeight: 700, fontSize: 15 }}>{p.pipeline}</span>
-                    <span style={{ fontSize: 13, color: 'var(--text2)' }}>{biz.length} leads</span>
+                    <span style={{ fontSize: 13, color: 'var(--text2)' }}>
+                      {totalMovements} {selectedMonth !== 'all' ? 'movimentos no mês' : 'leads no total'}
+                    </span>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {p.stages.map((s, si) => {
-                      const cnt = biz.filter(b => b.stageId === s.id).length
-                      if (cnt === 0 && selectedMonth !== 'all') return null
-                      const pct = maxCount > 0 ? (cnt / maxCount) * 100 : 0
-                      const isQual = s.name === 'Lead Qualificado' || s.name === 'Call Agendada'
+                    {stagesWithCount.map((s, si) => {
+                      if (s.movements === 0 && selectedMonth !== 'all') return null
+                      const pct = maxCount > 0 ? (s.movements / maxCount) * 100 : 0
+                      const isQual    = s.name === 'Lead Qualificado' || s.name === 'Call Agendada'
                       const isPerdido = s.name.toLowerCase().includes('perdido') || s.name.toLowerCase().includes('desqualificado')
-                      const barColor = isQual ? 'var(--green)' : isPerdido ? 'var(--red)' : SDR_COLORS[pi]
+                      const barColor  = isQual ? 'var(--green)' : isPerdido ? 'var(--red)' : SDR_COLORS[pi % SDR_COLORS.length]
                       return (
                         <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                          <div style={{ width: 180, fontSize: 12, textAlign: 'right', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: isQual ? 'var(--green)' : isPerdido ? 'var(--red)' : 'var(--text2)', fontWeight: isQual ? 700 : 400 }}>
+                          <div style={{ width: 180, fontSize: 12, textAlign: 'right', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            color: isQual ? 'var(--green)' : isPerdido ? 'var(--red)' : 'var(--text2)', fontWeight: isQual ? 700 : 400 }}>
                             {s.name}
                           </div>
                           <div style={{ flex: 1, height: 28, background: 'var(--bg-card2)', borderRadius: 6, overflow: 'hidden' }}>
-                            <div style={{ height: '100%', width: `${Math.max(pct, cnt > 0 ? 2 : 0)}%`, background: barColor, borderRadius: 6, transition: 'width .4s', display: 'flex', alignItems: 'center', paddingLeft: 8 }}>
-                              {cnt > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }}>{cnt}</span>}
+                            <div style={{ height: '100%', width: `${Math.max(pct, s.movements > 0 ? 2 : 0)}%`, background: barColor, borderRadius: 6, transition: 'width .4s', display: 'flex', alignItems: 'center', paddingLeft: 8 }}>
+                              {s.movements > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }}>{s.movements}</span>}
                             </div>
                           </div>
-                          <div style={{ width: 32, fontSize: 13, fontWeight: 700, color: barColor, textAlign: 'right' }}>{cnt}</div>
+                          <div style={{ width: 32, fontSize: 13, fontWeight: 700, color: barColor, textAlign: 'right' }}>{s.movements}</div>
                         </div>
                       )
                     })}
@@ -300,20 +330,23 @@ function ReportContent() {
               )
             })}
 
-            {/* Donut SDR */}
             {sdrPipelines.length > 1 && (
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
                 <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 20 }}>Distribuição entre Campanhas</div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 40, flexWrap: 'wrap' }}>
                   <DonutChart size={160} thickness={28} data={sdrPipelines.map((p, i) => ({
-                    label: p.pipeline, value: filteredBusinesses(p).length, color: SDR_COLORS[i],
+                    label: p.pipeline,
+                    value: selectedMonth !== 'all' ? filteredBusinesses(p).length : p.businesses.length,
+                    color: SDR_COLORS[i],
                   }))} />
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {sdrPipelines.map((p, i) => (
                       <div key={p.pipeline} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ width: 12, height: 12, borderRadius: 3, background: SDR_COLORS[i], flexShrink: 0 }} />
                         <span style={{ fontSize: 13, fontWeight: 600 }}>{p.pipeline}</span>
-                        <span style={{ fontSize: 13, color: 'var(--text2)' }}>{filteredBusinesses(p).length} leads</span>
+                        <span style={{ fontSize: 13, color: 'var(--text2)' }}>
+                          {selectedMonth !== 'all' ? filteredBusinesses(p).length : p.businesses.length} leads
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -338,12 +371,12 @@ function ReportContent() {
                 <tbody>
                   {[...pipelines, ...sdrPipelines].flatMap((p, pi) =>
                     filteredBusinesses(p)
-                      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                      .sort((a, b) => new Date(b.lastMovedAt ?? b.createdAt).getTime() - new Date(a.lastMovedAt ?? a.createdAt).getTime())
                       .map((b, i) => {
-                        const isAtivo = b.stageName === 'Cliente Ativo' || b.stageName === 'Cliente Ativo (Campanha)'
+                        const isAtivo   = b.stageName === 'Cliente Ativo' || b.stageName === 'Cliente Ativo (Campanha)'
                         const isPerdido = b.stageName.toLowerCase().includes('perdido') || b.stageName.toLowerCase().includes('desqualificado')
-                        const isSdr = p.type === 'sdr'
-                        const pColor = isSdr ? SDR_COLORS[pi % 3] : PIPELINE_COLORS[pi % 3]
+                        const isSdr     = p.type === 'sdr'
+                        const pColor    = isSdr ? SDR_COLORS[pi % 3] : PIPELINE_COLORS[pi % 3]
                         const stageColor = isAtivo ? 'var(--green)' : isPerdido ? 'var(--red)' : 'var(--text2)'
                         return (
                           <tr key={b.id} style={{ background: i % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-card2)' }}>
@@ -374,23 +407,21 @@ function ReportContent() {
         {/* ── ABA: DESEMPENHO ───────────────────────────────────────────────── */}
         {activeTab === 'desempenho' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            {/* Conversão por pipeline */}
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
               <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 20 }}>Taxa de Conversão por Closer</div>
               <BarChartH data={pipelines.map((p, i) => {
-                const biz = filteredBusinesses(p)
+                const biz   = p.businesses
                 const ativo = biz.filter(b => b.stageName === 'Cliente Ativo' || b.stageName === 'Cliente Ativo (Campanha)').length
-                const taxa = biz.length > 0 ? Math.round((ativo / biz.length) * 100) : 0
+                const taxa  = biz.length > 0 ? Math.round((ativo / biz.length) * 100) : 0
                 return { label: `${p.pipeline} (${p.closer.split(' ')[0]})`, value: taxa }
               })} valueKey="value" labelKey="label" />
             </div>
 
-            {/* Estágios mais comuns */}
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
               <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 20 }}>Distribuição por Etapa (combinado)</div>
               {(() => {
                 const stageMap = new Map<string, number>()
-                pipelines.forEach(p => filteredBusinesses(p).forEach(b => {
+                pipelines.forEach(p => p.businesses.forEach(b => {
                   stageMap.set(b.stageName, (stageMap.get(b.stageName) ?? 0) + 1)
                 }))
                 const sorted = [...stageMap.entries()].sort((a, b) => b[1] - a[1])
@@ -398,9 +429,9 @@ function ReportContent() {
                 return (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {sorted.map(([name, count], i) => {
-                      const isAtivo = name === 'Cliente Ativo' || name === 'Cliente Ativo (Campanha)'
+                      const isAtivo   = name === 'Cliente Ativo' || name === 'Cliente Ativo (Campanha)'
                       const isPerdido = name.toLowerCase().includes('perdido') || name.toLowerCase().includes('desqualificado')
-                      const color = isAtivo ? 'var(--green)' : isPerdido ? 'var(--red)' : STAGE_COLORS[i % STAGE_COLORS.length]
+                      const color     = isAtivo ? 'var(--green)' : isPerdido ? 'var(--red)' : STAGE_COLORS[i % STAGE_COLORS.length]
                       return (
                         <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                           <div style={{ width: 150, fontSize: 12, color: 'var(--text2)', textAlign: 'right', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
@@ -416,7 +447,6 @@ function ReportContent() {
               })()}
             </div>
 
-            {/* Evolução mensal */}
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
               <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 20 }}>Movimentações por Mês</div>
               {(() => {

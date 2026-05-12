@@ -60,7 +60,7 @@ serve(async (req) => {
 
     const h = { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
 
-    // 1. Busca todos os pipelines
+    // 1. Pipelines
     const pipelinesRes = await fetch(`${BASE}/pipelines?take=50`, { headers: h })
     const pipelinesData = await pipelinesRes.json()
     const allPipelines: any[] = pipelinesData.data ?? pipelinesData ?? []
@@ -74,7 +74,7 @@ serve(async (req) => {
         type:   CLOSER_IDS.has(p.id) ? 'closer' : 'sdr',
       }))
 
-    // 2. Busca stages de todos os pipelines em paralelo
+    // 2. Stages de cada pipeline
     const pipelinesWithStages = await Promise.all(PIPELINES.map(async (pipeline) => {
       const stagesRes = await fetch(`${BASE}/pipelines/${pipeline.id}/stages`, { headers: h })
       const stagesData = await stagesRes.json()
@@ -90,11 +90,11 @@ serve(async (req) => {
       }
     }
 
-    // 4. Busca TODOS os negócios (filtros da API não funcionam)
+    // 4. Todos os negócios (sem filtro — API ignora filtros)
     const allBusinesses = await fetchAllPages(`${BASE}/businesses`, h)
-    console.log(`[datacrazy-report] total businesses: ${allBusinesses.length}`)
+    console.log(`[datacrazy-report] businesses: ${allBusinesses.length}`)
 
-    // 5. Agrupa por pipeline via stage.pipeline.id ou mapa de stages
+    // 5. Agrupa por pipeline — sem deduplicação
     const businessesByPipeline = new Map<string, any[]>()
     for (const b of allBusinesses) {
       const pid = b.stage?.pipeline?.id
@@ -105,21 +105,33 @@ serve(async (req) => {
       businessesByPipeline.get(pid)!.push(b)
     }
 
-    // 6. Monta resultado — inclui lastMovedAt para filtrar movimentações no frontend
+    // 6. Activities — podem conter histórico de mudança de etapa
+    const allActivities = await fetchAllPages(`${BASE}/activities`, h)
+    console.log(`[datacrazy-report] activities: ${allActivities.length}`)
+
+    // Mapa businessId -> lista de activities (para enriquecer dados)
+    const activitiesByBusiness = new Map<string, any[]>()
+    for (const act of allActivities) {
+      const bid = act.businessId ?? act.business?.id
+      if (!bid) continue
+      if (!activitiesByBusiness.has(bid)) activitiesByBusiness.set(bid, [])
+      activitiesByBusiness.get(bid)!.push(act)
+    }
+
+    // 7. Resultado
     const results = pipelinesWithStages.map(({ pipeline, stages }) => {
       const businesses = businessesByPipeline.get(pipeline.id) ?? []
-      console.log(`[datacrazy-report] pipeline="${pipeline.name}" count=${businesses.length}`)
+      console.log(`[datacrazy-report] "${pipeline.name}" businesses=${businesses.length}`)
 
       return {
         pipeline:   pipeline.name,
         closer:     pipeline.closer,
         type:       pipeline.type,
         pipelineId: pipeline.id,
-        stages: stages.sort((a, b) => a.index - b.index).map((s: any) => ({
+        stages: stages.sort((a: any, b: any) => a.index - b.index).map((s: any) => ({
           id:    s.id,
           name:  s.name,
           index: s.index,
-          // count total atual (posição atual)
           count: businesses.filter(b => b.stageId === s.id).length,
         })),
         businesses: businesses.map(b => ({
@@ -133,6 +145,15 @@ serve(async (req) => {
           updatedAt:   b.updatedAt,
           lastMovedAt: b.lastMovedAt ?? b.updatedAt ?? b.createdAt,
           total:       b.total ?? 0,
+          // Activities deste negócio (inclui histórico de tarefas/movimentos)
+          activities: (activitiesByBusiness.get(b.id) ?? []).map((a: any) => ({
+            id:          a.id,
+            title:       a.title ?? '',
+            type:        a.type ?? a.activityType ?? '',
+            createdAt:   a.createdAt,
+            stageId:     a.stageId ?? a.stage?.id ?? null,
+            stageName:   a.stage?.name ?? a.stageName ?? '',
+          })),
         })),
       }
     })
