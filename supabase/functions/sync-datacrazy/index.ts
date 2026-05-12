@@ -117,27 +117,29 @@ serve(async (req) => {
 
     if (!leadId) return json({ success: false, error: 'Falha ao criar/encontrar lead' }, 500)
 
-    // ── 4. Busca businesses do lead e filtra pelo pipeline correto ───────────
-    // O filtro pipelineId na query não funciona na API — filtramos client-side
-    const bRes = await fetch(`${BASE}/businesses?leadId=${leadId}&take=100`, { headers: h })
+    // ── 4. Tenta criar novo card — só edita se já existir neste pipeline ──────
+    // Usa GET /leads/{id}/businesses que filtra corretamente por lead
+    const bRes = await fetch(`${BASE}/leads/${leadId}/businesses?take=50`, { headers: h })
     const bData = await bRes.json()
     const existingBusiness = (bData.data ?? []).find(
       (b: any) => b.stage?.pipeline?.id === pipeline.pipelineId
     )
 
     if (existingBusiness) {
+      // Já existe card neste pipeline → move para Cliente Ativo
       const moveRes = await fetch(`${BASE}/businesses/${existingBusiness.id}`, {
         method: 'PATCH', headers: h,
         body: JSON.stringify({ stageId: pipeline.stageId }),
       })
-      console.log(`[sync-datacrazy] Card movido para Cliente Ativo: ${existingBusiness.id} | status: ${moveRes.status}`)
+      console.log(`[sync-datacrazy] Card existente movido para Cliente Ativo: ${existingBusiness.id} | status: ${moveRes.status}`)
     } else {
+      // Não existe → cria novo card diretamente em Cliente Ativo
       const cRes = await fetch(`${BASE}/businesses`, {
         method: 'POST', headers: h,
         body: JSON.stringify({ leadId, stageId: pipeline.stageId }),
       })
       const created = await cRes.json()
-      console.log(`[sync-datacrazy] Card criado em Cliente Ativo: ${created?.id}`)
+      console.log(`[sync-datacrazy] Novo card criado em Cliente Ativo: ${created?.id}`)
     }
 
     // ── 5. Atualiza campo "notes" do lead (quadro de notas na esquerda) ──────
