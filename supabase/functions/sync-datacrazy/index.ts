@@ -144,9 +144,14 @@ serve(async (req) => {
 
     // ── 5. Atualiza campo "notes" do lead (quadro de notas na esquerda) ──────
     if (notes) {
+      // Converte URLs soltas em markdown [url](url) para ficarem clicáveis
+      const notesFormatted = notes.replace(
+        /(?<![(\[])(https?:\/\/[^\s)\]]+)/g,
+        (url: string) => `[${url}](${url})`
+      )
       const noteRes = await fetch(`${BASE}/leads/${leadId}`, {
         method: 'PATCH', headers: h,
-        body: JSON.stringify({ notes }),
+        body: JSON.stringify({ notes: notesFormatted }),
       })
       console.log(`[sync-datacrazy] Campo notes atualizado: ${noteRes.status}`)
     }
