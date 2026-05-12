@@ -211,11 +211,12 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
 
       // Upload de novos arquivos
       const imageUrls: string[] = []
+      const emailSlug = form.email.replace('@', '_').replace(/\./g, '_')
       for (const file of form.images) {
         const ext  = file.name.split('.').pop()
-        const path = `${form.email}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+        const path = `${emailSlug}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
         const { error: upErr } = await supabase.storage
-          .from('ativacoes-arquivos').upload(path, file, { upsert: false })
+          .from('ativacoes-arquivos').upload(path, file, { upsert: true })
         if (upErr) {
           toast(`Erro ao enviar arquivo ${file.name}: ${upErr.message}`, 'error')
         } else {
@@ -283,12 +284,13 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
 
       // Upload de imagens para o Supabase Storage
       const imageUrls: string[] = []
+      const emailSlug2 = emailSanitized.replace('@', '_').replace(/\./g, '_')
       for (const file of form.images) {
         const ext  = file.name.split('.').pop()
-        const path = `${emailSanitized}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+        const path = `${emailSlug2}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
         const { error: upErr } = await supabase.storage
           .from('ativacoes-arquivos')
-          .upload(path, file, { upsert: false })
+          .upload(path, file, { upsert: true })
         if (upErr) {
           toast(`Erro ao enviar arquivo ${file.name}: ${upErr.message}`, 'error')
         } else {
