@@ -138,17 +138,32 @@ serve(async (req) => {
     }
 
     // ── 5. Atualiza campo "notes" do lead (quadro de notas na esquerda) ──────
-    const noteParts: string[] = []
-    if (notes) noteParts.push(notes)
-    if (image_urls?.length > 0) {
-      noteParts.push(`📎 Arquivos:\n${(image_urls as string[]).join('\n')}`)
-    }
-    if (noteParts.length > 0) {
+    if (notes) {
       const noteRes = await fetch(`${BASE}/leads/${leadId}`, {
         method: 'PATCH', headers: h,
-        body: JSON.stringify({ notes: noteParts.join('\n\n') }),
+        body: JSON.stringify({ notes }),
       })
       console.log(`[sync-datacrazy] Campo notes atualizado: ${noteRes.status}`)
+    }
+
+    // ── 6. Envia arquivos para a aba Arquivos do lead ────────────────────────
+    if (image_urls?.length > 0) {
+      for (const url of image_urls as string[]) {
+        const fileName = decodeURIComponent(url.split('/').pop()?.split('?')[0] ?? 'arquivo')
+
+        // Obtém tamanho do arquivo via HEAD
+        let fileSize = 0
+        try {
+          const headRes = await fetch(url, { method: 'HEAD' })
+          fileSize = parseInt(headRes.headers.get('content-length') ?? '0', 10) || 0
+        } catch { /* ignora erro de HEAD */ }
+
+        const attRes = await fetch(`${BASE}/leads/${leadId}/attachments`, {
+          method: 'POST', headers: h,
+          body: JSON.stringify({ attachmentUrl: url, fileName, fileSize }),
+        })
+        console.log(`[sync-datacrazy] Arquivo enviado: ${fileName} | status: ${attRes.status}`)
+      }
     }
 
     return json({ success: true, leadId })
