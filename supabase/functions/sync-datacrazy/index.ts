@@ -123,9 +123,9 @@ serve(async (req) => {
     )
 
     if (existingBusiness) {
-      const moveRes = await fetch(`${BASE}/businesses/actions/move`, {
-        method: 'POST', headers: h,
-        body: JSON.stringify({ ids: [existingBusiness.id], stageId: pipeline.stageId }),
+      const moveRes = await fetch(`${BASE}/businesses/${existingBusiness.id}`, {
+        method: 'PATCH', headers: h,
+        body: JSON.stringify({ stageId: pipeline.stageId }),
       })
       console.log(`[sync-datacrazy] Card movido para Cliente Ativo: ${existingBusiness.id} | status: ${moveRes.status}`)
     } else {
