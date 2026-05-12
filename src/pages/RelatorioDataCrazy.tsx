@@ -16,7 +16,7 @@ const STAGE_COLORS = [
 ]
 
 type Stage      = { id: string; name: string; index: number; count: number }
-type Business   = { id: string; leadId: string; leadName: string; leadEmail: string; stageId: string; stageName: string; createdAt: string; updatedAt: string; total: number }
+type Business   = { id: string; leadId: string; leadName: string; leadEmail: string; stageId: string; stageName: string; createdAt: string; updatedAt: string; lastMovedAt: string; total: number }
 type Pipeline   = { pipeline: string; closer: string; type: string; pipelineId: string; stages: Stage[]; businesses: Business[] }
 type ReportData = { pipelines: Pipeline[]; fetchedAt: string }
 
@@ -49,16 +49,17 @@ function ReportContent() {
 
   useEffect(() => { load() }, [])
 
-  // Meses disponíveis a partir dos dados
+  // Meses disponíveis baseados em lastMovedAt (movimentação, não criação)
   const availableMonths = data ? [...new Set(
-    data.pipelines.flatMap(p => p.businesses.map(b => b.createdAt?.slice(0, 7) ?? ''))
+    data.pipelines.flatMap(p => p.businesses.map(b => (b.lastMovedAt ?? b.createdAt)?.slice(0, 7) ?? ''))
   )].filter(Boolean).sort((a, b) => b.localeCompare(a)) : []
 
-  // Filtra businesses por mês e pipeline
+  // Filtra businesses por mês de movimentação (lastMovedAt)
   function filteredBusinesses(p: Pipeline) {
     return p.businesses.filter(b => {
-      const monthMatch = selectedMonth === 'all' || b.createdAt?.startsWith(selectedMonth)
-      return monthMatch
+      if (selectedMonth === 'all') return true
+      const moved = b.lastMovedAt ?? b.createdAt ?? ''
+      return moved.startsWith(selectedMonth)
     })
   }
 
@@ -329,7 +330,7 @@ function ReportContent() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
                   <tr>
-                    {['Pipeline', 'Lead', 'E-mail', 'Etapa', 'Entrada', 'Últ. Atualização'].map(h => (
+                    {['Pipeline', 'Lead', 'E-mail', 'Etapa', 'Movido em', 'Criado em'].map(h => (
                       <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em', borderBottom: '1px solid var(--border)', background: 'var(--bg-card2)', whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
@@ -355,10 +356,10 @@ function ReportContent() {
                               <span style={{ fontSize: 11, fontWeight: 700, color: stageColor, background: `color-mix(in srgb, ${stageColor === 'var(--text2)' ? '#64748b' : stageColor} 12%, var(--bg-card2))`, borderRadius: 20, padding: '2px 9px' }}>{b.stageName}</span>
                             </td>
                             <td style={{ padding: '9px 16px', borderBottom: '1px solid var(--border)', color: 'var(--text2)', whiteSpace: 'nowrap' }}>
-                              {new Date(b.createdAt).toLocaleDateString('pt-BR')}
+                              {new Date(b.lastMovedAt ?? b.updatedAt).toLocaleDateString('pt-BR')}
                             </td>
                             <td style={{ padding: '9px 16px', borderBottom: '1px solid var(--border)', color: 'var(--text2)', whiteSpace: 'nowrap' }}>
-                              {new Date(b.updatedAt).toLocaleDateString('pt-BR')}
+                              {new Date(b.createdAt).toLocaleDateString('pt-BR')}
                             </td>
                           </tr>
                         )
@@ -417,11 +418,11 @@ function ReportContent() {
 
             {/* Evolução mensal */}
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 20 }}>Negócios Criados por Mês</div>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 20 }}>Movimentações por Mês</div>
               {(() => {
                 const monthMap = new Map<string, number>()
                 pipelines.forEach(p => p.businesses.forEach(b => {
-                  const m = b.createdAt?.slice(0, 7) ?? ''
+                  const m = (b.lastMovedAt ?? b.createdAt)?.slice(0, 7) ?? ''
                   if (m) monthMap.set(m, (monthMap.get(m) ?? 0) + 1)
                 }))
                 const sorted = [...monthMap.entries()].sort((a, b) => a[0].localeCompare(b[0]))

@@ -1,6 +1,5 @@
 // @ts-nocheck
 // Edge Function: datacrazy-report
-// Busca todos os negócios dos pipelines Closer 1, 2 e 3 no DataCrazy
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -12,20 +11,18 @@ const CORS = {
 
 const BASE = 'https://api.g1.datacrazy.io/api/v1'
 
-// Pipelines fixos de Closer (não entram na lista SDR)
 const CLOSER_IDS = new Set([
-  '4d88436f-d761-4e34-b974-d7890273a829', // Closer 1
-  '746ec7cc-ff48-4139-9b40-977e0540d875', // Closer 2
-  '22150736-c65d-472a-b3e8-5b14373a881c', // Closer 3
+  '4d88436f-d761-4e34-b974-d7890273a829',
+  '746ec7cc-ff48-4139-9b40-977e0540d875',
+  '22150736-c65d-472a-b3e8-5b14373a881c',
 ])
 const CLOSER_META: Record<string, { closer: string }> = {
   '4d88436f-d761-4e34-b974-d7890273a829': { closer: 'Victor Vieira' },
   '746ec7cc-ff48-4139-9b40-977e0540d875': { closer: 'Wilson Neto' },
   '22150736-c65d-472a-b3e8-5b14373a881c': { closer: 'Isaac' },
 }
-// Pipelines a ignorar completamente
 const IGNORE_IDS = new Set([
-  '6ed13d75-cdad-482b-aab3-57860abe0483', // Teste
+  '6ed13d75-cdad-482b-aab3-57860abe0483',
 ])
 
 async function fetchAllPages(url: string, headers: Record<string, string>) {
@@ -63,12 +60,11 @@ serve(async (req) => {
 
     const h = { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
 
-    // Busca todos os pipelines dinamicamente
+    // 1. Busca todos os pipelines
     const pipelinesRes = await fetch(`${BASE}/pipelines?take=50`, { headers: h })
     const pipelinesData = await pipelinesRes.json()
     const allPipelines: any[] = pipelinesData.data ?? pipelinesData ?? []
 
-    // Classifica: closer, sdr ou ignora
     const PIPELINES = allPipelines
       .filter((p: any) => !IGNORE_IDS.has(p.id))
       .map((p: any) => ({
@@ -78,51 +74,68 @@ serve(async (req) => {
         type:   CLOSER_IDS.has(p.id) ? 'closer' : 'sdr',
       }))
 
-    // Busca todos os stages e negócios de todos os pipelines em paralelo
-    const results = await Promise.all(PIPELINES.map(async (pipeline: any) => {
-      // Busca stages do pipeline
+    // 2. Busca stages de todos os pipelines em paralelo
+    const pipelinesWithStages = await Promise.all(PIPELINES.map(async (pipeline) => {
       const stagesRes = await fetch(`${BASE}/pipelines/${pipeline.id}/stages`, { headers: h })
       const stagesData = await stagesRes.json()
       const stages: any[] = stagesData.data ?? stagesData ?? []
+      return { pipeline, stages }
+    }))
 
-      // Busca todos os negócios do pipeline
-      const businesses = await fetchAllPages(
-        `${BASE}/businesses?pipelineId=${pipeline.id}`, h
-      )
-
-      // Deduplicação: para cada lead, mantém apenas 1 negócio (mais recente) por pipeline
-      const seenLeads = new Map<string, any>()
-      for (const b of businesses) {
-        const leadId = b.leadId
-        if (!seenLeads.has(leadId) ||
-            new Date(b.createdAt) > new Date(seenLeads.get(leadId).createdAt)) {
-          seenLeads.set(leadId, b)
-        }
+    // 3. Mapa stageId -> pipelineId
+    const stageToPipeline = new Map<string, string>()
+    for (const { pipeline, stages } of pipelinesWithStages) {
+      for (const stage of stages) {
+        stageToPipeline.set(stage.id, pipeline.id)
       }
-      const deduplicated = [...seenLeads.values()]
+    }
+
+    // 4. Busca TODOS os negócios (filtros da API não funcionam)
+    const allBusinesses = await fetchAllPages(`${BASE}/businesses`, h)
+    console.log(`[datacrazy-report] total businesses: ${allBusinesses.length}`)
+
+    // 5. Agrupa por pipeline via stage.pipeline.id ou mapa de stages
+    const businessesByPipeline = new Map<string, any[]>()
+    for (const b of allBusinesses) {
+      const pid = b.stage?.pipeline?.id
+        ?? stageToPipeline.get(b.stageId)
+        ?? b.pipelineId
+      if (!pid) continue
+      if (!businessesByPipeline.has(pid)) businessesByPipeline.set(pid, [])
+      businessesByPipeline.get(pid)!.push(b)
+    }
+
+    // 6. Monta resultado — inclui lastMovedAt para filtrar movimentações no frontend
+    const results = pipelinesWithStages.map(({ pipeline, stages }) => {
+      const businesses = businessesByPipeline.get(pipeline.id) ?? []
+      console.log(`[datacrazy-report] pipeline="${pipeline.name}" count=${businesses.length}`)
 
       return {
-        pipeline: pipeline.name,
-        closer: pipeline.closer,
-        type: pipeline.type,
+        pipeline:   pipeline.name,
+        closer:     pipeline.closer,
+        type:       pipeline.type,
         pipelineId: pipeline.id,
         stages: stages.sort((a, b) => a.index - b.index).map((s: any) => ({
-          id: s.id, name: s.name, index: s.index,
-          count: deduplicated.filter(b => b.stageId === s.id).length,
+          id:    s.id,
+          name:  s.name,
+          index: s.index,
+          // count total atual (posição atual)
+          count: businesses.filter(b => b.stageId === s.id).length,
         })),
-        businesses: deduplicated.map(b => ({
-          id:         b.id,
-          leadId:     b.leadId,
-          leadName:   b.lead?.name ?? '',
-          leadEmail:  b.lead?.email ?? '',
-          stageId:    b.stageId,
-          stageName:  b.stage?.name ?? '',
-          createdAt:  b.createdAt,
-          updatedAt:  b.updatedAt,
-          total:      b.total ?? 0,
+        businesses: businesses.map(b => ({
+          id:          b.id,
+          leadId:      b.leadId,
+          leadName:    b.lead?.name ?? '',
+          leadEmail:   b.lead?.email ?? '',
+          stageId:     b.stageId,
+          stageName:   b.stage?.name ?? '',
+          createdAt:   b.createdAt,
+          updatedAt:   b.updatedAt,
+          lastMovedAt: b.lastMovedAt ?? b.updatedAt ?? b.createdAt,
+          total:       b.total ?? 0,
         })),
       }
-    }))
+    })
 
     return json({ pipelines: results, fetchedAt: new Date().toISOString() })
 
