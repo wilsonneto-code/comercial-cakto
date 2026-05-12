@@ -137,18 +137,18 @@ serve(async (req) => {
       console.log(`[sync-datacrazy] Card criado em Cliente Ativo: ${created?.id}`)
     }
 
-    // ── 5. Posta nota no lead ────────────────────────────────────────────────
+    // ── 5. Atualiza campo "notes" do lead (quadro de notas na esquerda) ──────
     const noteParts: string[] = []
     if (notes) noteParts.push(notes)
     if (image_urls?.length > 0) {
       noteParts.push(`📎 Arquivos:\n${(image_urls as string[]).join('\n')}`)
     }
     if (noteParts.length > 0) {
-      const noteRes = await fetch(`${BASE}/leads/${leadId}/notes`, {
-        method: 'POST', headers: h,
-        body: JSON.stringify({ note: noteParts.join('\n\n') }),
+      const noteRes = await fetch(`${BASE}/leads/${leadId}`, {
+        method: 'PATCH', headers: h,
+        body: JSON.stringify({ notes: noteParts.join('\n\n') }),
       })
-      console.log(`[sync-datacrazy] Nota postada: ${noteRes.status}`)
+      console.log(`[sync-datacrazy] Campo notes atualizado: ${noteRes.status}`)
     }
 
     return json({ success: true, leadId })
