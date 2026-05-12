@@ -208,10 +208,28 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
 
     if (modalEdit) {
       const sdrUser = form.sdr_id ? users.find(u => u.id === form.sdr_id) : null
+
+      // Upload de novos arquivos
+      const imageUrls: string[] = []
+      for (const file of form.images) {
+        const ext  = file.name.split('.').pop()
+        const path = `${form.email}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+        const { error: upErr } = await supabase.storage
+          .from('ativacoes-arquivos').upload(path, file, { upsert: false })
+        if (upErr) {
+          toast(`Erro ao enviar arquivo ${file.name}: ${upErr.message}`, 'error')
+        } else {
+          const { data: urlData } = supabase.storage.from('ativacoes-arquivos').getPublicUrl(path)
+          if (urlData?.publicUrl) imageUrls.push(urlData.publicUrl)
+        }
+      }
+
       const patch = {
         client: capitalize(form.client), email: form.email, phone: form.phone || null,
         channel: form.channel as ActivationChannel, responsible: form.responsible, date: form.date,
         sdr_id: form.sdr_id || null, sdr_nome: sdrUser?.name || null,
+        notes: form.notes || null,
+        ...(imageUrls.length > 0 ? { image_urls: imageUrls } : {}),
       }
       const { error } = await supabase.from('activations').update(patch).eq('id', modalEdit.id)
       setIsSaving(false)
@@ -219,6 +237,26 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
       setActivations(p => p.map(a => a.id === modalEdit.id ? { ...a, ...patch } : a))
       toast('Ativação atualizada!', 'success')
       setModalEdit(null)
+
+      // Sincroniza com DataCrazy se tiver arquivos ou notas novas
+      if (imageUrls.length > 0 || form.notes) {
+        const responsibleUser = users.find(u => u.id === form.responsible)
+        if (responsibleUser?.team_id) {
+          supabase.auth.getSession().then(({ data: { session } }) => {
+            void supabase.functions.invoke('sync-datacrazy', {
+              body: {
+                name:       capitalize(form.client),
+                email:      form.email,
+                phone:      form.phone || null,
+                team_uuid:  responsibleUser.team_id,
+                notes:      form.notes || null,
+                image_urls: imageUrls,
+              },
+              headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined,
+            })
+          })
+        }
+      }
     } else {
       const emailSanitized = form.email.trim().toLowerCase()
 
