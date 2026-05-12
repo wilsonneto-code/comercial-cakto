@@ -54,7 +54,7 @@ serve(async (req) => {
       .eq('chave', 'datacrazy_api_key')
       .maybeSingle()
 
-    const apiKey = cfg?.valor || Deno.env.get('DATACRAZY_API_KEY') ?? ''
+    const apiKey = (cfg?.valor || Deno.env.get('DATACRAZY_API_KEY')) ?? ''
     if (!apiKey) return json({ success: false, error: 'datacrazy_api_key não configurada em Configurações' }, 400)
 
     const pipeline = TEAM_PIPELINE[team_uuid]
