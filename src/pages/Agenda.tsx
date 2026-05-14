@@ -786,9 +786,9 @@ function AgendaContent() {
                 options={['Agendada', 'Realizada', 'Cancelada', 'No-show']} placeholder="Status" />
             </Field>
             <Field label="Nome do SDR">
-              <input className="inp" value={form.sdrNome}
-                onChange={e => setForm({ ...form, sdrNome: e.target.value })}
-                placeholder="Nome do SDR que agendou (opcional)" />
+              <Sel value={form.sdrNome} onChange={v => setForm({ ...form, sdrNome: v })}
+                options={users.filter(u => u.role === 'SDR').map(u => ({ value: u.name, label: u.name }))}
+                placeholder="Selecione o SDR (opcional)" />
             </Field>
             <Field label="E-mail do Cliente">
               <input className="inp" type="email" value={form.clientEmail}
