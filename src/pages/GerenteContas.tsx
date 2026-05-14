@@ -31,10 +31,21 @@ const MEET_STATUS_COLORS: Record<string, string> = {
 }
 
 type DbUser       = { id: string; name: string; role: string }
+const KANBAN_COLS = [
+  { key: 'Cliente novo',              color: '#6B78FF' },
+  { key: 'Cliente atendido',          color: '#2BB9FF' },
+  { key: 'Cliente ainda não faturando', color: '#d97706' },
+  { key: 'Cliente faturando',         color: '#07BA1C' },
+  { key: 'Reunião com Cliente',       color: '#BF5AF2' },
+] as const
+
+type KanbanStatus = typeof KANBAN_COLS[number]['key']
+
 type DbActivation = {
   id: string; client: string; email: string; phone: string | null
   responsible: string; date: string; notes: string | null
   faturamento_mensal: number | null; gerente_id: string | null
+  gc_status: string
 }
 type Meeting = {
   id: string; activation_id: string | null; gerente_id: string | null
@@ -89,7 +100,7 @@ function GCContent() {
   const today    = new Date()
   const todayStr = today.toISOString().slice(0,10)
 
-  const [tab, setTab]             = useState<'funis' | 'agenda'>('funis')
+  const [tab, setTab]             = useState<'kanban' | 'funis' | 'agenda'>('kanban')
   const [users, setUsers]         = useState<DbUser[]>([])
   const [activations, setActs]    = useState<DbActivation[]>([])
   const [meetings, setMeetings]   = useState<Meeting[]>([])
@@ -117,7 +128,7 @@ function GCContent() {
       setIsLoading(true)
       const [{ data: usrs }, { data: acts }, { data: mtgs }] = await Promise.all([
         supabase.from('users').select('id,name,role').order('name'),
-        supabase.from('activations').select('id,client,email,phone,responsible,date,notes,faturamento_mensal,gerente_id').order('date', { ascending: false }),
+        supabase.from('activations').select('id,client,email,phone,responsible,date,notes,faturamento_mensal,gerente_id,gc_status').order('date', { ascending: false }),
         supabase.from('followup_meetings').select('*').order('date').order('time'),
       ])
       const userList = (usrs || []) as DbUser[]
@@ -170,6 +181,13 @@ function GCContent() {
   function getMeetingsForDay(day: number) {
     const dStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
     return visibleMeetings.filter(m => m.date === dStr)
+  }
+
+  // ── Move card no Kanban ──────────────────────────────────────────────────
+  async function moveKanban(id: string, status: string) {
+    const { error } = await supabase.from('activations').update({ gc_status: status }).eq('id', id)
+    if (error) { toast(error.message, 'error'); return }
+    setActs(p => p.map(a => a.id === id ? { ...a, gc_status: status } : a))
   }
 
   // ── Save client (faturamento + gerente) ─────────────────────────────────
@@ -381,7 +399,7 @@ function GCContent() {
 
         {/* ── Tabs ── */}
         <div style={{ display: 'flex', gap: 4, background: 'var(--bg-card2)', borderRadius: 10, padding: 4, marginBottom: 20, width: 'fit-content' }}>
-          {([['funis','Funis de Clientes'],['agenda','Agenda']] as const).map(([k,l]) => (
+          {([['kanban','Kanban'],['funis','Funis de Clientes'],['agenda','Agenda']] as const).map(([k,l]) => (
             <button key={k} onClick={() => setTab(k)} style={{
               padding: '7px 18px', borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
               background: tab === k ? 'var(--action)' : 'transparent',
@@ -389,6 +407,110 @@ function GCContent() {
             }}>{l}</button>
           ))}
         </div>
+
+        {/* ══ ABA KANBAN ════════════════════════════════════════════════════ */}
+        {tab === 'kanban' && (
+          <div style={{ overflowX: 'auto', paddingBottom: 16 }}>
+            <div style={{ display: 'flex', gap: 14, minWidth: 'max-content' }}>
+              {KANBAN_COLS.map(col => {
+                const cards = visibleActs.filter(a => (a.gc_status || 'Cliente novo') === col.key)
+                return (
+                  <div key={col.key} style={{ width: 260, flexShrink: 0 }}>
+                    {/* Cabeçalho da coluna */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12,
+                      padding: '10px 14px', borderRadius: 10,
+                      background: `color-mix(in srgb, ${col.color} 12%, var(--bg-card2))`,
+                      border: `1px solid ${col.color}` }}>
+                      <div style={{ width: 10, height: 10, borderRadius: '50%', background: col.color, flexShrink: 0 }} />
+                      <span style={{ fontWeight: 800, fontSize: 13, color: col.color, flex: 1 }}>{col.key}</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: col.color,
+                        background: `color-mix(in srgb, ${col.color} 20%, var(--bg-card2))`,
+                        borderRadius: 20, padding: '1px 8px' }}>{cards.length}</span>
+                    </div>
+
+                    {/* Cards */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 'calc(100vh - 300px)', overflowY: 'auto', paddingRight: 4 }}>
+                      {cards.length === 0 && (
+                        <div style={{ fontSize: 12, color: 'var(--text2)', textAlign: 'center', padding: '20px 0', borderRadius: 10, border: '1px dashed var(--border)' }}>
+                          Nenhum cliente
+                        </div>
+                      )}
+                      {cards.map(a => {
+                        const f      = funil(a.faturamento_mensal)
+                        const fColor = f ? FUNIL_COLORS[f] : 'var(--border)'
+                        const closer = users.find(u => u.id === a.responsible)?.name || '—'
+                        const gerente = users.find(u => u.id === a.gerente_id)?.name
+                        const clientMeetings = visibleMeetings.filter(m => m.activation_id === a.id)
+                        const colIdx = KANBAN_COLS.findIndex(c => c.key === col.key)
+                        return (
+                          <div key={a.id} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: 12, borderTop: `3px solid ${col.color}` }}>
+                            {/* Nome + funil */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6, marginBottom: 8 }}>
+                              <div style={{ fontWeight: 700, fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.client}</div>
+                              {f && <span style={{ fontSize: 10, fontWeight: 700, color: fColor, background: `color-mix(in srgb, ${fColor} 15%, var(--bg-card2))`, borderRadius: 20, padding: '2px 7px', flexShrink: 0 }}>{f}</span>}
+                            </div>
+
+                            {/* Infos */}
+                            <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 4 }}>{a.email}</div>
+                            <div style={{ display: 'flex', gap: 8, fontSize: 11, marginBottom: 8, flexWrap: 'wrap' }}>
+                              <span>Closer: <b>{closer.split(' ')[0]}</b></span>
+                              {gerente && <span style={{ color: 'var(--action)' }}>GC: <b>{gerente.split(' ')[0]}</b></span>}
+                              {a.faturamento_mensal != null && <span style={{ color: fColor, fontWeight: 700 }}>{BRL(a.faturamento_mensal)}/mês</span>}
+                            </div>
+
+                            {/* Reuniões */}
+                            {clientMeetings.length > 0 && (
+                              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
+                                {clientMeetings.slice(0,2).map(m => (
+                                  <span key={m.id} onClick={e => { e.stopPropagation(); setSheetMeet(m) }}
+                                    style={{ fontSize: 10, padding: '2px 6px', borderRadius: 20, cursor: 'pointer',
+                                      background: `color-mix(in srgb, ${MEET_STATUS_COLORS[m.status] || 'var(--border)'} 15%, var(--bg-card2))`,
+                                      color: MEET_STATUS_COLORS[m.status] || 'var(--text2)',
+                                      border: `1px solid ${MEET_STATUS_COLORS[m.status] || 'var(--border)'}`,
+                                      fontWeight: 600 }}>
+                                    {m.date.slice(5)} {m.status}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Ações */}
+                            <div style={{ display: 'flex', gap: 6, borderTop: '1px solid var(--border)', paddingTop: 8, marginTop: 4 }}>
+                              {/* Mover para coluna anterior */}
+                              {colIdx > 0 && (
+                                <button onClick={() => moveKanban(a.id, KANBAN_COLS[colIdx - 1].key)}
+                                  style={{ fontSize: 10, padding: '3px 7px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card2)', cursor: 'pointer', color: 'var(--text2)', fontFamily: 'inherit' }}>
+                                  ← {KANBAN_COLS[colIdx - 1].key.split(' ')[1] || '←'}
+                                </button>
+                              )}
+                              <button onClick={() => openNewMeet(a.email, a.id)}
+                                style={{ fontSize: 10, padding: '3px 8px', borderRadius: 6, border: `1px solid ${col.color}`, background: `color-mix(in srgb, ${col.color} 10%, var(--bg-card))`, cursor: 'pointer', color: col.color, fontFamily: 'inherit', fontWeight: 700 }}>
+                                + Reunião
+                              </button>
+                              {/* Mover para próxima coluna */}
+                              {colIdx < KANBAN_COLS.length - 1 && (
+                                <button onClick={() => moveKanban(a.id, KANBAN_COLS[colIdx + 1].key)}
+                                  style={{ fontSize: 10, padding: '3px 7px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card2)', cursor: 'pointer', color: 'var(--text2)', fontFamily: 'inherit' }}>
+                                  {KANBAN_COLS[colIdx + 1].key.split(' ')[1] || '→'} →
+                                </button>
+                              )}
+                              {/* Mover para qualquer coluna via select */}
+                              <select value={col.key}
+                                onChange={e => moveKanban(a.id, e.target.value)}
+                                style={{ marginLeft: 'auto', fontSize: 10, padding: '3px 4px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card2)', color: 'var(--text2)', cursor: 'pointer', fontFamily: 'inherit', maxWidth: 80 }}>
+                                {KANBAN_COLS.map(c => <option key={c.key} value={c.key}>{c.key}</option>)}
+                              </select>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* ══ ABA FUNIS ══════════════════════════════════════════════════════ */}
         {tab === 'funis' && (

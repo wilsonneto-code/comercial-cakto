@@ -92,7 +92,8 @@
       "Bash(npx vercel *)",
       "Bash(vercel --prod)",
       "WebFetch(domain:www.cakto.com.br)",
-      "Bash(curl -s https://www.cakto.com.br)"
+      "Bash(curl -s https://www.cakto.com.br)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(r['id'], r['name'], r['role']\\) for r in d['rows']]\")"
     ]
   }
 }
