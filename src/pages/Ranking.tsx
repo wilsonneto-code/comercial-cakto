@@ -118,12 +118,15 @@ export default function Ranking() {
         const realizadas = uCalls.filter(c => c.status === 'Realizada').length
         const noshow     = uCalls.filter(c => c.status === 'No-show').length
         const canceladas = uCalls.filter(c => c.status === 'Cancelada').length
-        const taxaReal   = agendadas > 0 ? Math.round((realizadas / agendadas) * 100) : 0
+        const taxaReal    = agendadas > 0 ? Math.round((realizadas / agendadas) * 100) : 0
+        const scoreAgd    = Math.min(100, Math.round((agendadas / 200) * 100))
+        const scoreReal   = Math.min(100, Math.round((realizadas / 160) * 100))
+        const score       = Math.round((scoreAgd + scoreReal) / 2)
         return {
           userId: u.id, name: u.name, role: u.role,
           team: teams.find(t => t.id === u.team_id)?.name || '—',
           activations: atv,
-          score: Math.min(100, atv * 10),
+          score,
           variation: 0,
           calls: agendadas, realizadas, noshow, canceladas,
           taxaRealizacao: taxaReal, taxaAtivacao: 0,
@@ -197,7 +200,9 @@ export default function Ranking() {
                 </>}
                 {showSdrCalls && <>
                   <th>Agendadas</th>
+                  <th>Meta 200</th>
                   <th>Realizadas</th>
+                  <th>Meta 160</th>
                   <th>No-show</th>
                   <th>Canceladas</th>
                   <th>% Realização</th>
@@ -207,7 +212,7 @@ export default function Ranking() {
             </thead>
             <tbody>
               {ranking.length === 0 && (
-                <tr><td colSpan={showCalls ? 11 : showSdrCalls ? 10 : 5} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32 }}>
+                <tr><td colSpan={showCalls ? 11 : showSdrCalls ? 12 : 5} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32 }}>
                   Nenhum dado disponível.
                 </td></tr>
               )}
@@ -224,7 +229,23 @@ export default function Ranking() {
                   <td style={{ fontWeight: 700 }}>{r.activations}</td>
                   {showSdrCalls && <>
                     <td style={{ fontWeight: 700, color: 'var(--action)' }}>{r.calls}</td>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ width: 48, background: 'var(--bg-card2)', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${Math.min(100, Math.round(r.calls/200*100))}%`, background: r.calls >= 200 ? 'var(--green)' : 'var(--action)', borderRadius: 4 }} />
+                        </div>
+                        <span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600 }}>{Math.min(100, Math.round(r.calls/200*100))}%</span>
+                      </div>
+                    </td>
                     <td style={{ fontWeight: 600, color: 'var(--green)' }}>{r.realizadas}</td>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ width: 48, background: 'var(--bg-card2)', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${Math.min(100, Math.round(r.realizadas/160*100))}%`, background: r.realizadas >= 160 ? 'var(--green)' : '#0891b2', borderRadius: 4 }} />
+                        </div>
+                        <span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600 }}>{Math.min(100, Math.round(r.realizadas/160*100))}%</span>
+                      </div>
+                    </td>
                     <td style={{ fontWeight: 600, color: 'var(--orange)' }}>{r.noshow}</td>
                     <td style={{ fontWeight: 600, color: 'var(--red)' }}>{r.canceladas}</td>
                     <td>
