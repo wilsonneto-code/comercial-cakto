@@ -77,6 +77,7 @@ export default function App() {
       <Route path="/gerente-contas" element={<ProtectedRoute><GerenteContas /></ProtectedRoute>} />
       <Route path="/pagamentos" element={<ProtectedRoute><Pagamentos /></ProtectedRoute>} />
       <Route path="/carteiras" element={<ProtectedRoute><Carteiras /></ProtectedRoute>} />
+      <Route path="/metabase" element={<ProtectedRoute><Carteiras /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
