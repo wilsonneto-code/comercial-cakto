@@ -15,7 +15,7 @@ import { format, startOfMonth, endOfMonth } from 'date-fns'
 type DbUser = { id: string; name: string; role: string; team_id: string | null; active: boolean }
 type DbTeam = { id: string; name: string }
 type DbActivation = { responsible: string; sdr_id: string | null; date: string }
-type DbCall = { responsible: string; status: string; ativado: boolean | null; date: string }
+type DbCall = { responsible: string; status: string; ativado: boolean | null; date: string; sdr_nome: string | null }
 
 type RankEntry = {
   userId: string; name: string; role: string; team: string
@@ -53,7 +53,7 @@ export default function Ranking() {
         supabase.from('teams').select('id,name').order('name'),
         supabase.from('activations').select('responsible,sdr_id,date')
           .gte('date', dateRange.startDate).lte('date', dateRange.endDate),
-        supabase.from('calls').select('responsible,status,ativado,date')
+        supabase.from('calls').select('responsible,status,ativado,date,sdr_nome')
           .gte('date', dateRange.startDate).lte('date', dateRange.endDate),
       ])
       if (ue) toast(ue.message, 'error')
@@ -104,22 +104,34 @@ export default function Ranking() {
 
   // ── Ranking SDR ───────────────────────────────────────────────────────────
   const sdrRanking = useMemo<RankEntry[]>(() => {
-    const counts: Record<string, number> = {}
-    activations.forEach(a => { if (a.sdr_id) counts[a.sdr_id] = (counts[a.sdr_id] || 0) + 1 })
+    // Ativações por sdr_id
+    const actCounts: Record<string, number> = {}
+    activations.forEach(a => { if (a.sdr_id) actCounts[a.sdr_id] = (actCounts[a.sdr_id] || 0) + 1 })
+
+    // Calls agendadas pelo SDR (por nome — campo sdr_nome na tabela calls)
+    const callsBySdrName: Record<string, number> = {}
+    calls.forEach(c => {
+      if (c.sdr_nome) callsBySdrName[c.sdr_nome] = (callsBySdrName[c.sdr_nome] || 0) + 1
+    })
+
     return users
       .filter(u => u.role === 'SDR')
       .filter(u => !filterTeam || teams.find(t => t.id === u.team_id)?.name === filterTeam)
-      .map(u => ({
-        userId: u.id, name: u.name, role: u.role,
-        team: teams.find(t => t.id === u.team_id)?.name || '—',
-        activations: counts[u.id] || 0,
-        score: Math.min(100, (counts[u.id] || 0) * 10),
-        variation: 0,
-        calls: 0, realizadas: 0, noshow: 0, canceladas: 0,
-        taxaRealizacao: 0, taxaAtivacao: 0,
-      }))
-      .sort((a, b) => b.activations - a.activations)
-  }, [users, teams, activations, filterTeam])
+      .map(u => {
+        const atv       = actCounts[u.id] || 0
+        const callsAgd  = callsBySdrName[u.name] || 0
+        return {
+          userId: u.id, name: u.name, role: u.role,
+          team: teams.find(t => t.id === u.team_id)?.name || '—',
+          activations: atv,
+          score: Math.min(100, atv * 10),
+          variation: 0,
+          calls: callsAgd, realizadas: 0, noshow: 0, canceladas: 0,
+          taxaRealizacao: 0, taxaAtivacao: 0,
+        }
+      })
+      .sort((a, b) => b.calls - a.calls || b.activations - a.activations)
+  }, [users, teams, activations, calls, filterTeam])
 
   const closerTop3   = closerRanking.slice(0, 3)
   const sdrTop3      = sdrRanking.slice(0, 3)
@@ -165,7 +177,7 @@ export default function Ranking() {
     )
   }
 
-  function RankingTable({ ranking, title, showCalls = false }: { ranking: RankEntry[]; title: string; showCalls?: boolean }) {
+  function RankingTable({ ranking, title, showCalls = false, showSdrCalls = false }: { ranking: RankEntry[]; title: string; showCalls?: boolean; showSdrCalls?: boolean }) {
     return (
       <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 15 }}>
@@ -184,12 +196,13 @@ export default function Ranking() {
                   <th>% Realização</th>
                   <th>% Ativação</th>
                 </>}
+                {showSdrCalls && <th>Calls Agendadas</th>}
                 <th>Score</th>
               </tr>
             </thead>
             <tbody>
               {ranking.length === 0 && (
-                <tr><td colSpan={showCalls ? 11 : 5} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32 }}>
+                <tr><td colSpan={showCalls ? 11 : showSdrCalls ? 6 : 5} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32 }}>
                   Nenhum dado disponível.
                 </td></tr>
               )}
@@ -204,6 +217,9 @@ export default function Ranking() {
                   </td>
                   <td style={{ fontSize: 13, color: 'var(--text2)' }}>{r.team}</td>
                   <td style={{ fontWeight: 700 }}>{r.activations}</td>
+                  {showSdrCalls && (
+                    <td style={{ fontWeight: 700, color: 'var(--action)' }}>{r.calls}</td>
+                  )}
                   {showCalls && <>
                     <td style={{ fontWeight: 600 }}>{r.calls}</td>
                     <td style={{ fontWeight: 600, color: 'var(--green)' }}>{r.realizadas}</td>
@@ -291,7 +307,7 @@ export default function Ranking() {
                     <BarChartV data={sdrChart} height={180} />
                   </div>
                 )}
-                <RankingTable ranking={sdrRanking} title="Ranking SDR" />
+                <RankingTable ranking={sdrRanking} title="Ranking SDR" showSdrCalls />
               </section>
             )}
 
