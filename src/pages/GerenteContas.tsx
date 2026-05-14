@@ -52,6 +52,17 @@ function funil(fat: number | null): 'Starter' | 'Growth' | 'Enterprise' | null {
 
 const BRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 
+const GERENTE_POR_FUNIL: Record<string, string> = {
+  Starter:    '0bfe1dcb-9827-4a2a-8850-8343c53985f5', // Carlos Eduardo
+  Growth:     'ea6caf80-fea1-4cd5-b7e0-6a124b783e04', // Gabriel Bairros
+  Enterprise: '4923ac02-3f50-49b9-8443-f7e1b0e9f6d6', // Rafael Mendes
+}
+function gerentePorFaturamento(fat: number | null): string | null {
+  if (!fat) return null
+  const tier = funil(fat)
+  return tier ? GERENTE_POR_FUNIL[tier] : null
+}
+
 const EMPTY_MEET = { activation_id: '', gerente_id: '', title: '', date: '', time: '', endTime: '', status: 'Agendada', notes: '', clientEmail: '' }
 
 export default function GerenteContas() {
@@ -166,8 +177,14 @@ function GCContent() {
     if (!modalClient) return
     setIsSaving(true)
     const patch: any = {}
-    if (clientForm.faturamento_mensal !== '') patch.faturamento_mensal = parseFloat(clientForm.faturamento_mensal.replace(/\./g,'').replace(',','.')) || null
-    if (clientForm.gerente_id !== '') patch.gerente_id = clientForm.gerente_id || null
+    if (clientForm.faturamento_mensal !== '') {
+      const fat = parseFloat(clientForm.faturamento_mensal.replace(/\./g,'').replace(',','.')) || null
+      patch.faturamento_mensal = fat
+      // Auto-atribui gerente conforme funil, mas permite sobrescrever manualmente
+      patch.gerente_id = clientForm.gerente_id || gerentePorFaturamento(fat)
+    } else if (clientForm.gerente_id !== '') {
+      patch.gerente_id = clientForm.gerente_id || null
+    }
     const { error } = await supabase.from('activations').update(patch).eq('id', modalClient.id)
     setIsSaving(false)
     if (error) { toast(error.message, 'error'); return }
@@ -485,13 +502,18 @@ function GCContent() {
                 onChange={e => setClientForm(p => ({ ...p, faturamento_mensal: e.target.value }))}
                 placeholder="Ex: 75000" type="number" />
             </Field>
-            {clientForm.faturamento_mensal && (
-              <div style={{ fontSize: 13, padding: '8px 12px', borderRadius: 8, background: 'var(--bg-card2)' }}>
-                Funil: <span style={{ fontWeight: 700, color: FUNIL_COLORS[funil(parseFloat(clientForm.faturamento_mensal) || 0) || 'Starter'] }}>
-                  {funil(parseFloat(clientForm.faturamento_mensal) || 0) || '—'}
-                </span>
-              </div>
-            )}
+            {clientForm.faturamento_mensal && (() => {
+              const fat  = parseFloat(clientForm.faturamento_mensal) || 0
+              const tier = funil(fat) || 'Starter'
+              const gId  = GERENTE_POR_FUNIL[tier]
+              const gName = users.find(u => u.id === gId)?.name || '—'
+              return (
+                <div style={{ fontSize: 13, padding: '8px 12px', borderRadius: 8, background: 'var(--bg-card2)', display: 'flex', gap: 12 }}>
+                  <span>Funil: <span style={{ fontWeight: 700, color: FUNIL_COLORS[tier] }}>{tier}</span></span>
+                  <span style={{ color: 'var(--text2)' }}>Gerente: <span style={{ fontWeight: 700, color: 'var(--action)' }}>{gName}</span></span>
+                </div>
+              )
+            })()}
             <Field label="Gerente de Contas">
               <Sel value={clientForm.gerente_id} onChange={v => setClientForm(p => ({ ...p, gerente_id: v }))}
                 options={gerentes.map(g => ({ value: g.id, label: g.name }))}

@@ -29,6 +29,19 @@ type DbTeam  = { id: string; name: string }
 type AuthUser = { id: string; name: string; role: string; team_id: string | null }
 
 const CHANNELS: ActivationChannel[] = ['Inbound', 'Outbound', 'Indicação']
+
+// Atribuição automática de gerente por funil
+const GERENTE_POR_FUNIL: Record<string, string> = {
+  Starter:    '0bfe1dcb-9827-4a2a-8850-8343c53985f5', // Carlos Eduardo
+  Growth:     'ea6caf80-fea1-4cd5-b7e0-6a124b783e04', // Gabriel Bairros
+  Enterprise: '4923ac02-3f50-49b9-8443-f7e1b0e9f6d6', // Rafael Mendes
+}
+function gerentePorFaturamento(fat: number | null): string | null {
+  if (!fat) return null
+  if (fat <= 50000)  return GERENTE_POR_FUNIL.Starter
+  if (fat <= 250000) return GERENTE_POR_FUNIL.Growth
+  return GERENTE_POR_FUNIL.Enterprise
+}
 const EMPTY_FORM = { client: '', email: '', channel: 'Inbound', responsible: '', date: '', phone: '+55 ', sdr_id: '', notes: '', images: [] as File[], faturamento_mensal: '' }
 const PER_PAGE = 5
 
@@ -231,6 +244,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
         sdr_id: form.sdr_id || null, sdr_nome: sdrUser?.name || null,
         notes: form.notes || null,
         faturamento_mensal: form.faturamento_mensal ? parseFloat(form.faturamento_mensal.replace(/\./g,'').replace(',','.')) || null : null,
+        gerente_id: gerentePorFaturamento(form.faturamento_mensal ? parseFloat(form.faturamento_mensal) || null : null),
         ...(imageUrls.length > 0 ? { image_urls: imageUrls } : {}),
       }
       const { error } = await supabase.from('activations').update(patch).eq('id', modalEdit.id)
@@ -310,6 +324,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
         notes:              form.notes || null,
         image_urls:         imageUrls,
         faturamento_mensal: form.faturamento_mensal ? parseFloat(form.faturamento_mensal.replace(/\./g,'').replace(',','.')) || null : null,
+        gerente_id: gerentePorFaturamento(form.faturamento_mensal ? parseFloat(form.faturamento_mensal) || null : null),
       }
       const { data, error } = await supabase.from('activations').insert(row).select().single()
       setIsSaving(false)
