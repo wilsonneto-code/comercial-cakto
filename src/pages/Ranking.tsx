@@ -15,10 +15,13 @@ import { format, startOfMonth, endOfMonth } from 'date-fns'
 type DbUser = { id: string; name: string; role: string; team_id: string | null; active: boolean }
 type DbTeam = { id: string; name: string }
 type DbActivation = { responsible: string; sdr_id: string | null; date: string }
+type DbCall = { responsible: string; status: string; ativado: boolean | null; date: string }
 
 type RankEntry = {
   userId: string; name: string; role: string; team: string
   activations: number; score: number; variation: number
+  calls: number; realizadas: number; noshow: number; canceladas: number
+  taxaRealizacao: number; taxaAtivacao: number
 }
 
 const MEDAL_COLORS  = ['var(--gold)', '#C0C0C0', '#CD7F32']
@@ -34,6 +37,7 @@ export default function Ranking() {
   const [users,       setUsers]       = useState<DbUser[]>([])
   const [teams,       setTeams]       = useState<DbTeam[]>([])
   const [activations, setActivations] = useState<DbActivation[]>([])
+  const [calls,       setCalls]       = useState<DbCall[]>([])
   const [isLoading,   setIsLoading]   = useState(true)
   const [filterTeam,  setFilterTeam]  = useState('')
   const [sheetUser,   setSheetUser]   = useState<RankEntry | null>(null)
@@ -44,18 +48,22 @@ export default function Ranking() {
     if (!dateRange.startDate || !dateRange.endDate) return
     async function load() {
       setIsLoading(true)
-      const [{ data: usrs, error: ue }, { data: tms, error: te }, { data: acts, error: ae }] = await Promise.all([
+      const [{ data: usrs, error: ue }, { data: tms, error: te }, { data: acts, error: ae }, { data: cls, error: ce }] = await Promise.all([
         supabase.from('users').select('id,name,role,team_id,active').order('name'),
         supabase.from('teams').select('id,name').order('name'),
         supabase.from('activations').select('responsible,sdr_id,date')
+          .gte('date', dateRange.startDate).lte('date', dateRange.endDate),
+        supabase.from('calls').select('responsible,status,ativado,date')
           .gte('date', dateRange.startDate).lte('date', dateRange.endDate),
       ])
       if (ue) toast(ue.message, 'error')
       if (te) toast(te.message, 'error')
       if (ae) toast(ae.message, 'error')
+      if (ce) toast(ce.message, 'error')
       if (usrs) setUsers(usrs as DbUser[])
       if (tms)  setTeams(tms as DbTeam[])
       if (acts) setActivations(acts as DbActivation[])
+      if (cls)  setCalls(cls as DbCall[])
       setIsLoading(false)
     }
     load()
@@ -64,20 +72,35 @@ export default function Ranking() {
 
   // ── Ranking Closers ───────────────────────────────────────────────────────
   const closerRanking = useMemo<RankEntry[]>(() => {
-    const counts: Record<string, number> = {}
-    activations.forEach(a => { counts[a.responsible] = (counts[a.responsible] || 0) + 1 })
+    const actCounts: Record<string, number> = {}
+    activations.forEach(a => { actCounts[a.responsible] = (actCounts[a.responsible] || 0) + 1 })
+
     return users
       .filter(u => u.role === 'Closer')
       .filter(u => !filterTeam || teams.find(t => t.id === u.team_id)?.name === filterTeam)
-      .map(u => ({
-        userId: u.id, name: u.name, role: u.role,
-        team: teams.find(t => t.id === u.team_id)?.name || '—',
-        activations: counts[u.id] || 0,
-        score: Math.min(100, (counts[u.id] || 0) * 10),
-        variation: 0,
-      }))
+      .map(u => {
+        const uCalls     = calls.filter(c => c.responsible === u.id)
+        const realizadas = uCalls.filter(c => c.status === 'Realizada').length
+        const noshow     = uCalls.filter(c => c.status === 'No-show').length
+        const canceladas = uCalls.filter(c => c.status === 'Cancelada').length
+        const ativadas   = uCalls.filter(c => c.ativado === true).length
+        const taxaReal   = uCalls.length > 0 ? Math.round((realizadas / uCalls.length) * 100) : 0
+        const taxaAtiv   = realizadas > 0 ? Math.round((ativadas / realizadas) * 100) : 0
+        const atv        = actCounts[u.id] || 0
+        return {
+          userId: u.id, name: u.name, role: u.role,
+          team: teams.find(t => t.id === u.team_id)?.name || '—',
+          activations: atv,
+          score: Math.min(100, atv * 10),
+          variation: 0,
+          calls: uCalls.length,
+          realizadas, noshow, canceladas,
+          taxaRealizacao: taxaReal,
+          taxaAtivacao: taxaAtiv,
+        }
+      })
       .sort((a, b) => b.activations - a.activations)
-  }, [users, teams, activations, filterTeam])
+  }, [users, teams, activations, calls, filterTeam])
 
   // ── Ranking SDR ───────────────────────────────────────────────────────────
   const sdrRanking = useMemo<RankEntry[]>(() => {
@@ -92,6 +115,8 @@ export default function Ranking() {
         activations: counts[u.id] || 0,
         score: Math.min(100, (counts[u.id] || 0) * 10),
         variation: 0,
+        calls: 0, realizadas: 0, noshow: 0, canceladas: 0,
+        taxaRealizacao: 0, taxaAtivacao: 0,
       }))
       .sort((a, b) => b.activations - a.activations)
   }, [users, teams, activations, filterTeam])
@@ -140,7 +165,7 @@ export default function Ranking() {
     )
   }
 
-  function RankingTable({ ranking, title }: { ranking: RankEntry[]; title: string }) {
+  function RankingTable({ ranking, title, showCalls = false }: { ranking: RankEntry[]; title: string; showCalls?: boolean }) {
     return (
       <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 15 }}>
@@ -149,11 +174,22 @@ export default function Ranking() {
         <div className="scroll-x">
           <table className="tbl">
             <thead>
-              <tr><th>#</th><th>Nome</th><th>Time</th><th>Ativações</th><th>Score</th><th>Variação</th></tr>
+              <tr>
+                <th>#</th><th>Nome</th><th>Time</th><th>Ativações</th>
+                {showCalls && <>
+                  <th>Calls</th>
+                  <th>Realizadas</th>
+                  <th>No-show</th>
+                  <th>Canceladas</th>
+                  <th>% Realização</th>
+                  <th>% Ativação</th>
+                </>}
+                <th>Score</th>
+              </tr>
             </thead>
             <tbody>
               {ranking.length === 0 && (
-                <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32 }}>
+                <tr><td colSpan={showCalls ? 11 : 5} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32 }}>
                   Nenhum dado disponível.
                 </td></tr>
               )}
@@ -168,6 +204,24 @@ export default function Ranking() {
                   </td>
                   <td style={{ fontSize: 13, color: 'var(--text2)' }}>{r.team}</td>
                   <td style={{ fontWeight: 700 }}>{r.activations}</td>
+                  {showCalls && <>
+                    <td style={{ fontWeight: 600 }}>{r.calls}</td>
+                    <td style={{ fontWeight: 600, color: 'var(--green)' }}>{r.realizadas}</td>
+                    <td style={{ fontWeight: 600, color: 'var(--orange)' }}>{r.noshow}</td>
+                    <td style={{ fontWeight: 600, color: 'var(--red)' }}>{r.canceladas}</td>
+                    <td>
+                      <span style={{
+                        fontWeight: 700, fontSize: 13,
+                        color: r.taxaRealizacao >= 70 ? 'var(--green)' : r.taxaRealizacao >= 40 ? 'var(--orange)' : 'var(--red)'
+                      }}>{r.taxaRealizacao}%</span>
+                    </td>
+                    <td>
+                      <span style={{
+                        fontWeight: 700, fontSize: 13,
+                        color: r.taxaAtivacao >= 50 ? 'var(--green)' : r.taxaAtivacao >= 25 ? 'var(--orange)' : 'var(--red)'
+                      }}>{r.taxaAtivacao}%</span>
+                    </td>
+                  </>}
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <div style={{ flex: 1, maxWidth: 80 }}>
@@ -177,14 +231,6 @@ export default function Ranking() {
                       </div>
                       <span style={{ fontSize: 12, fontWeight: 600 }}>{r.score}</span>
                     </div>
-                  </td>
-                  <td>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontWeight: 700, fontSize: 13,
-                      color: r.variation > 0 ? 'var(--green)' : r.variation < 0 ? 'var(--red)' : 'var(--text2)' }}>
-                      {r.variation > 0 && <ArrowUp size={13} color="var(--green)" />}
-                      {r.variation < 0 && <ArrowDown size={13} color="var(--red)" />}
-                      {r.variation === 0 ? '—' : Math.abs(r.variation)}
-                    </span>
                   </td>
                 </tr>
               ))}
@@ -232,7 +278,7 @@ export default function Ranking() {
                     <BarChartV data={closerChart} height={180} />
                   </div>
                 )}
-                <RankingTable ranking={closerRanking} title="Ranking Closers" />
+                <RankingTable ranking={closerRanking} title="Ranking Closers" showCalls />
               </section>
             ) : (
               <section>
