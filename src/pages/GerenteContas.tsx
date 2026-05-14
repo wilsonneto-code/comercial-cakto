@@ -45,7 +45,7 @@ type DbActivation = {
   id: string; client: string; email: string; phone: string | null
   responsible: string; date: string; notes: string | null
   faturamento_mensal: number | null; gerente_id: string | null
-  gc_status: string
+  gc_status: string; welcome_sent: boolean
 }
 type Meeting = {
   id: string; activation_id: string | null; gerente_id: string | null
@@ -146,7 +146,7 @@ function GCContent() {
       setIsLoading(true)
       const [{ data: usrs }, { data: acts }, { data: mtgs }] = await Promise.all([
         supabase.from('users').select('id,name,role').order('name'),
-        supabase.from('activations').select('id,client,email,phone,responsible,date,notes,faturamento_mensal,gerente_id,gc_status').order('date', { ascending: false }),
+        supabase.from('activations').select('id,client,email,phone,responsible,date,notes,faturamento_mensal,gerente_id,gc_status,welcome_sent').order('date', { ascending: false }),
         supabase.from('followup_meetings').select('*').order('date').order('time'),
       ])
       const userList = (usrs || []) as DbUser[]
@@ -206,6 +206,13 @@ function GCContent() {
     const { error } = await supabase.from('activations').update({ gc_status: status }).eq('id', id)
     if (error) { toast(error.message, 'error'); return }
     setActs(p => p.map(a => a.id === id ? { ...a, gc_status: status } : a))
+  }
+
+  async function confirmWelcomeSent(id: string) {
+    const { error } = await supabase.from('activations').update({ welcome_sent: true }).eq('id', id)
+    if (error) { toast(error.message, 'error'); return }
+    setActs(p => p.map(a => a.id === id ? { ...a, welcome_sent: true } : a))
+    toast('Mensagem de boas-vindas confirmada ✓', 'success')
   }
 
   // ── Save client (faturamento + gerente) ─────────────────────────────────
@@ -495,20 +502,41 @@ function GCContent() {
                             {/* WhatsApp — só na coluna Cliente novo */}
                             {col.key === 'Cliente novo' && (() => {
                               const waLink = whatsappLink(a.phone, a.client.split(' ')[0], gerente || 'Gerente')
-                              return waLink ? (
-                                <a href={waLink} target="_blank" rel="noreferrer"
-                                  style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%',
-                                    padding: '8px 12px', borderRadius: 8, marginBottom: 8,
-                                    background: 'color-mix(in srgb, #25D366 15%, var(--bg-card2))',
-                                    border: '1px solid #25D366', color: '#25D366',
-                                    fontWeight: 700, fontSize: 12, textDecoration: 'none',
-                                    justifyContent: 'center' }}>
-                                  <MessageCircle size={14} />
-                                  Enviar mensagem de boas-vindas
-                                </a>
-                              ) : (
-                                <div style={{ fontSize: 11, color: 'var(--orange)', marginBottom: 8, textAlign: 'center' }}>
-                                  Sem telefone cadastrado
+                              if (a.welcome_sent) {
+                                return (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8,
+                                    padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700,
+                                    background: 'color-mix(in srgb, #25D366 12%, var(--bg-card2))',
+                                    color: '#25D366', border: '1px solid #25D366' }}>
+                                    <MessageCircle size={13} /> Boas-vindas enviada ✓
+                                  </div>
+                                )
+                              }
+                              return (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+                                  {waLink ? (
+                                    <a href={waLink} target="_blank" rel="noreferrer"
+                                      style={{ display: 'flex', alignItems: 'center', gap: 6,
+                                        padding: '8px 12px', borderRadius: 8,
+                                        background: 'color-mix(in srgb, #25D366 15%, var(--bg-card2))',
+                                        border: '1px solid #25D366', color: '#25D366',
+                                        fontWeight: 700, fontSize: 12, textDecoration: 'none',
+                                        justifyContent: 'center' }}>
+                                      <MessageCircle size={14} />
+                                      Enviar mensagem de boas-vindas
+                                    </a>
+                                  ) : (
+                                    <div style={{ fontSize: 11, color: 'var(--orange)', textAlign: 'center' }}>
+                                      Sem telefone cadastrado
+                                    </div>
+                                  )}
+                                  <button onClick={() => confirmWelcomeSent(a.id)}
+                                    style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center',
+                                      padding: '6px 12px', borderRadius: 8, cursor: 'pointer',
+                                      border: '1px dashed #25D366', background: 'transparent',
+                                      color: '#25D366', fontWeight: 600, fontSize: 11, fontFamily: 'inherit' }}>
+                                    ✓ Confirmei que enviei a mensagem
+                                  </button>
                                 </div>
                               )
                             })()}
@@ -519,20 +547,30 @@ function GCContent() {
                               {colIdx > 0 && (
                                 <button onClick={() => moveKanban(a.id, KANBAN_COLS[colIdx - 1].key)}
                                   style={{ fontSize: 10, padding: '3px 7px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card2)', cursor: 'pointer', color: 'var(--text2)', fontFamily: 'inherit' }}>
-                                  ← {KANBAN_COLS[colIdx - 1].key.split(' ')[1] || '←'}
+                                  ← Voltar
                                 </button>
                               )}
                               <button onClick={() => openNewMeet(a.email, a.id)}
                                 style={{ fontSize: 10, padding: '3px 8px', borderRadius: 6, border: `1px solid ${col.color}`, background: `color-mix(in srgb, ${col.color} 10%, var(--bg-card))`, cursor: 'pointer', color: col.color, fontFamily: 'inherit', fontWeight: 700 }}>
                                 + Reunião
                               </button>
-                              {/* Mover para próxima coluna */}
-                              {colIdx < KANBAN_COLS.length - 1 && (
-                                <button onClick={() => moveKanban(a.id, KANBAN_COLS[colIdx + 1].key)}
-                                  style={{ fontSize: 10, padding: '3px 7px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card2)', cursor: 'pointer', color: 'var(--text2)', fontFamily: 'inherit' }}>
-                                  {KANBAN_COLS[colIdx + 1].key.split(' ')[1] || '→'} →
-                                </button>
-                              )}
+                              {/* Mover para próxima coluna — bloqueado em "Cliente novo" até welcome_sent */}
+                              {colIdx < KANBAN_COLS.length - 1 && (() => {
+                                const blocked = col.key === 'Cliente novo' && !a.welcome_sent
+                                return (
+                                  <button
+                                    onClick={() => !blocked && moveKanban(a.id, KANBAN_COLS[colIdx + 1].key)}
+                                    title={blocked ? 'Confirme o envio da mensagem de boas-vindas primeiro' : ''}
+                                    style={{ fontSize: 10, padding: '3px 7px', borderRadius: 6,
+                                      border: `1px solid ${blocked ? 'var(--border)' : 'var(--border)'}`,
+                                      background: blocked ? 'var(--bg-card2)' : 'var(--bg-card2)',
+                                      cursor: blocked ? 'not-allowed' : 'pointer',
+                                      color: blocked ? 'var(--border)' : 'var(--text2)',
+                                      fontFamily: 'inherit', opacity: blocked ? 0.4 : 1 }}>
+                                    Avançar →
+                                  </button>
+                                )
+                              })()}
                               {/* Mover para qualquer coluna via select */}
                               <select value={col.key}
                                 onChange={e => moveKanban(a.id, e.target.value)}
