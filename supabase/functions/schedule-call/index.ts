@@ -75,6 +75,7 @@ serve(async (req) => {
     // Tenta usar o token pessoal do GC, cai no token compartilhado se não tiver
     const gcTokens      = closerEmail ? await getGCTokens(closerEmail) : { refreshToken: null, calendarId: 'primary' }
     const calendarId    = gcTokens.calendarId || Deno.env.get('GOOGLE_CALENDAR_ID') || 'primary'
+    console.log('[schedule-call] closerEmail:', closerEmail, '| refreshToken exists:', !!gcTokens.refreshToken, '| calendarId:', calendarId)
     const accessToken   = await getAccessToken(gcTokens.refreshToken || undefined)
     const calBase     = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`
     const authHdr     = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }
@@ -154,7 +155,7 @@ serve(async (req) => {
     }
     const created  = await calRes.json()
     const meetLink = created.conferenceData?.entryPoints?.find((e: any) => e.entryPointType === 'video')?.uri ?? null
-    return json({ eventId: created.id, htmlLink: created.htmlLink, meetLink })
+    return json({ eventId: created.id, htmlLink: created.htmlLink, meetLink, _debug: { calendarId, closerEmail } })
 
   } catch (e) {
     console.error('[schedule-call] erro:', e)

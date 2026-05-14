@@ -295,8 +295,9 @@ function GCContent() {
       },
     }).then(async ({ data: fnData, error: fnErr }) => {
       if (fnErr) { toast(`Erro GCal: ${(fnErr as any)?.message ?? JSON.stringify(fnErr)}`, 'error'); return }
-      const { eventId, meetLink, error: fnBodyErr } = (fnData || {}) as any
+      const { eventId, meetLink, error: fnBodyErr, _debug } = (fnData || {}) as any
       if (fnBodyErr) { toast(`Erro GCal: ${fnBodyErr}`, 'error'); return }
+      if (_debug) console.log('[GCal debug]', _debug)
       if (eventId) {
         await supabase.from('followup_meetings').update({ google_event_id: eventId, meet_link: meetLink ?? '' }).eq('id', newM.id)
         setMeetings(p => p.map(m => m.id === newM.id ? { ...m, google_event_id: eventId, meet_link: meetLink ?? '' } : m))
@@ -339,7 +340,9 @@ function GCContent() {
       toast('Preencha título, data e gerente.', 'error'); return
     }
     setIsSaving(true)
-    const gerenteName = users.find(u => u.id === meetForm.gerente_id)?.name || '—'
+    const gerenteUser  = users.find(u => u.id === meetForm.gerente_id)
+    const gerenteName  = gerenteUser?.name || '—'
+    const gerenteEmail = gerenteUser?.email || ''
 
     if (editMeet) {
       const patch = {
