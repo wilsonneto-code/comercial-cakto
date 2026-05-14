@@ -119,6 +119,7 @@ function GCContent() {
   const todayStr = today.toISOString().slice(0,10)
 
   const [tab, setTab]             = useState<'kanban' | 'funis' | 'agenda'>('kanban')
+  const [gcConnected, setGcConnected] = useState<boolean | null>(null)
   const [users, setUsers]         = useState<DbUser[]>([])
   const [activations, setActs]    = useState<DbActivation[]>([])
   const [meetings, setMeetings]   = useState<Meeting[]>([])
@@ -143,6 +144,44 @@ function GCContent() {
   // Modal simplificado para agendar reunião direto do card
   const [quickMeetClient, setQuickMeetClient] = useState<DbActivation | null>(null)
   const [quickMeetForm,   setQuickMeetForm]   = useState({ date: '', time: '', endTime: '' })
+
+  // Verifica se o GC atual tem Google Calendar conectado
+  useEffect(() => {
+    if (!user?.id) return
+    supabase.from('users').select('google_refresh_token').eq('id', user.id).maybeSingle()
+      .then(({ data }) => setGcConnected(!!data?.google_refresh_token))
+    // Detecta retorno do OAuth
+    const params = new URLSearchParams(window.location.search)
+    const result = params.get('google_oauth')
+    if (result === 'success') { toast('Google Calendar conectado! ✓', 'success'); setGcConnected(true) }
+    if (result === 'error')   { toast('Erro ao conectar Google Calendar.', 'error') }
+    if (result) window.history.replaceState({}, '', '/gerente-contas')
+  }, [user?.id])
+
+  async function connectGoogleCalendar() {
+    const { data, error } = await supabase.functions.invoke('google-oauth', {
+      body: { user_id: user?.id }, headers: { 'x-action': 'url' }
+    })
+    // A edge function usa query param action=url
+    const res = await fetch(
+      `${(supabase as any).supabaseUrl}/functions/v1/google-oauth?action=url`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}` },
+        body: JSON.stringify({ user_id: user?.id }) }
+    )
+    const json = await res.json()
+    if (json.url) window.location.href = json.url
+    else toast('Erro ao gerar URL de autorização.', 'error')
+  }
+
+  async function disconnectGoogleCalendar() {
+    await fetch(
+      `${(supabase as any).supabaseUrl}/functions/v1/google-oauth?action=disconnect`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}` },
+        body: JSON.stringify({ user_id: user?.id }) }
+    )
+    setGcConnected(false)
+    toast('Google Calendar desconectado.', 'info')
+  }
 
   useEffect(() => {
     async function load() {
@@ -472,6 +511,28 @@ function GCContent() {
               <Sel value={filterGerente} onChange={setFilterGerente}
                 options={gerentes.map(g => ({ value: g.id, label: g.name }))}
                 placeholder="Todos os gerentes" />
+            )}
+            {/* Conexão Google Calendar */}
+            {gcConnected === false && (
+              <button onClick={connectGoogleCalendar} style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
+                borderRadius: 8, border: '1px solid #4285F4', cursor: 'pointer',
+                background: 'color-mix(in srgb, #4285F4 12%, var(--bg-card))',
+                color: '#4285F4', fontWeight: 700, fontSize: 13, fontFamily: 'inherit',
+              }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12.545,10.239v3.821h5.445c-0.712,2.315-2.647,3.972-5.445,3.972c-3.332,0-6.033-2.701-6.033-6.032c0-3.331,2.701-6.032,6.033-6.032c1.498,0,2.866,0.549,3.921,1.453l2.814-2.814C17.503,2.988,15.139,2,12.545,2C7.021,2,2.543,6.477,2.543,12s4.478,10,10.002,10c8.396,0,10.249-7.85,9.426-11.748L12.545,10.239z"/></svg>
+                Conectar Google Calendar
+              </button>
+            )}
+            {gcConnected === true && (
+              <button onClick={disconnectGoogleCalendar} style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
+                borderRadius: 8, border: '1px solid var(--green)', cursor: 'pointer',
+                background: 'color-mix(in srgb, var(--green) 10%, var(--bg-card))',
+                color: 'var(--green)', fontWeight: 600, fontSize: 13, fontFamily: 'inherit',
+              }}>
+                ✓ Google Calendar conectado
+              </button>
             )}
             <Button icon={Plus} onClick={() => openNewMeet()}>Nova Reunião</Button>
           </div>

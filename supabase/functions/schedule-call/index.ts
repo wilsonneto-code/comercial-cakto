@@ -4,6 +4,7 @@
 // Secrets: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN, GOOGLE_CALENDAR_ID
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const CORS = {
   'Access-Control-Allow-Origin':  '*',
@@ -12,13 +13,13 @@ const CORS = {
 
 const ADMIN_EMAIL = 'wilsonneto@cakto.com.br'
 
-async function getAccessToken(): Promise<string> {
+async function getAccessToken(refreshToken?: string): Promise<string> {
   const clientId     = Deno.env.get('GOOGLE_CLIENT_ID')     ?? ''
   const clientSecret = Deno.env.get('GOOGLE_CLIENT_SECRET') ?? ''
-  const refreshToken = Deno.env.get('GOOGLE_REFRESH_TOKEN') ?? ''
+  const token        = refreshToken || Deno.env.get('GOOGLE_REFRESH_TOKEN') || ''
 
-  if (!clientId || !clientSecret || !refreshToken) {
-    throw new Error('GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET ou GOOGLE_REFRESH_TOKEN não configurados.')
+  if (!clientId || !clientSecret || !token) {
+    throw new Error('Credenciais Google não configuradas.')
   }
 
   const res = await fetch('https://oauth2.googleapis.com/token', {
@@ -27,7 +28,7 @@ async function getAccessToken(): Promise<string> {
     body:    new URLSearchParams({
       client_id:     clientId,
       client_secret: clientSecret,
-      refresh_token: refreshToken,
+      refresh_token: token,
       grant_type:    'refresh_token',
     }).toString(),
   })
@@ -35,6 +36,26 @@ async function getAccessToken(): Promise<string> {
   const json = await res.json()
   if (!json.access_token) throw new Error(`Token error: ${JSON.stringify(json)}`)
   return json.access_token
+}
+
+async function getGCTokens(gerenteEmail: string): Promise<{ refreshToken: string | null; calendarId: string }> {
+  try {
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+    )
+    const { data } = await supabase
+      .from('users')
+      .select('google_refresh_token, google_calendar_id')
+      .eq('email', gerenteEmail)
+      .maybeSingle()
+    return {
+      refreshToken: data?.google_refresh_token ?? null,
+      calendarId:   data?.google_calendar_id ?? 'primary',
+    }
+  } catch {
+    return { refreshToken: null, calendarId: 'primary' }
+  }
 }
 
 // Cor determinística por nome do Closer — mesma lógica no frontend
@@ -49,9 +70,12 @@ serve(async (req) => {
 
   try {
     const body        = await req.json()
-    const action      = body.action ?? 'create'
-    const calendarId  = Deno.env.get('GOOGLE_CALENDAR_ID') || 'primary'
-    const accessToken = await getAccessToken()
+    const action        = body.action ?? 'create'
+    const closerEmail   = body.closerEmail ?? ''
+    // Tenta usar o token pessoal do GC, cai no token compartilhado se não tiver
+    const gcTokens      = closerEmail ? await getGCTokens(closerEmail) : { refreshToken: null, calendarId: 'primary' }
+    const calendarId    = gcTokens.calendarId || Deno.env.get('GOOGLE_CALENDAR_ID') || 'primary'
+    const accessToken   = await getAccessToken(gcTokens.refreshToken || undefined)
     const calBase     = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`
     const authHdr     = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }
     const json        = (s: unknown) => new Response(JSON.stringify(s), { headers: { ...CORS, 'Content-Type': 'application/json' } })
@@ -86,8 +110,9 @@ serve(async (req) => {
       notes ? `\n${notes}` : '',
     ].filter(Boolean).join('\n')
 
-    // Convidados: sempre o admin + o cliente (se informado)
+    // Convidados: admin + GC (se diferente do admin) + cliente
     const attendees: { email: string }[] = [{ email: ADMIN_EMAIL }]
+    if (closerEmail && closerEmail !== ADMIN_EMAIL) attendees.push({ email: closerEmail })
     if (clientEmail) attendees.push({ email: clientEmail })
 
     const event = {
