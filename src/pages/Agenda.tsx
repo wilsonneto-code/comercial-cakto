@@ -58,6 +58,7 @@ type CallItem = {
   meet_link:             string
   ativado:               boolean | null
   motivo_nao_ativacao:   string | null
+  sdrNome:               string
 }
 
 function formatInviteText(call: CallItem): string {
@@ -75,7 +76,7 @@ function formatInviteText(call: CallItem): string {
 
 type HistoryCall = CallItem & { period: string };
 
-const EMPTY_FORM = { title: '', date: '', time: '', endTime: '', responsibleId: '', status: 'Agendada', notes: '', clientEmail: '' };
+const EMPTY_FORM = { title: '', date: '', time: '', endTime: '', responsibleId: '', status: 'Agendada', notes: '', clientEmail: '', sdrNome: '' };
 
 export default function AgendaPage() {
   const { user, loading } = useAuth();
@@ -119,7 +120,7 @@ function AgendaContent() {
       setIsLoading(true);
       const [{ data: dbCalls, error: ce }, { data: dbUsers, error: ue }, { data: dbHistory }] = await Promise.all([
         supabase.from('calls')
-          .select('id,title,date,time,end_time,responsible,status,notes,client_email,google_event_id,meet_link,ativado,motivo_nao_ativacao')
+          .select('id,title,date,time,end_time,responsible,status,notes,client_email,google_event_id,meet_link,ativado,motivo_nao_ativacao,sdr_nome')
           .order('date').order('time'),
         supabase.from('users').select('id,name,role').order('name'),
         supabase.from('calls_history')
@@ -146,6 +147,7 @@ function AgendaContent() {
         meet_link:           c.meet_link ?? '',
         ativado:             c.ativado ?? null,
         motivo_nao_ativacao: c.motivo_nao_ativacao ?? null,
+        sdrNome:             c.sdr_nome ?? '',
         ...(period !== undefined ? { period } : {}),
       });
 
@@ -236,7 +238,7 @@ function AgendaContent() {
 
   function openEdit(call: CallItem) {
     setEditCall(call);
-    setForm({ title: call.title, date: call.date, time: call.time, endTime: call.endTime || '', responsibleId: call.responsibleId, status: call.status, notes: call.notes, clientEmail: call.clientEmail || '' });
+    setForm({ title: call.title, date: call.date, time: call.time, endTime: call.endTime || '', responsibleId: call.responsibleId, status: call.status, notes: call.notes, clientEmail: call.clientEmail || '', sdrNome: call.sdrNome || '' });
     setSheetCall(null);
     setModal(true);
   }
@@ -258,6 +260,7 @@ function AgendaContent() {
         status:       form.status as CallStatus,
         notes:        form.notes,
         client_email: form.clientEmail,
+        sdr_nome:     form.sdrNome || null,
       };
       const { error } = await supabase.from('calls').update(patch).eq('id', editCall.id);
       setIsSaving(false);
@@ -291,6 +294,7 @@ function AgendaContent() {
         status:       form.status as CallStatus,
         notes:        form.notes,
         client_email: form.clientEmail,
+        sdr_nome:     form.sdrNome || null,
       };
       const { data, error } = await supabase.from('calls').insert(row).select().single();
       setIsSaving(false);
@@ -781,6 +785,11 @@ function AgendaContent() {
               <Sel value={form.status} onChange={v => setForm({ ...form, status: v })}
                 options={['Agendada', 'Realizada', 'Cancelada', 'No-show']} placeholder="Status" />
             </Field>
+            <Field label="Nome do SDR">
+              <input className="inp" value={form.sdrNome}
+                onChange={e => setForm({ ...form, sdrNome: e.target.value })}
+                placeholder="Nome do SDR que agendou (opcional)" />
+            </Field>
             <Field label="E-mail do Cliente">
               <input className="inp" type="email" value={form.clientEmail}
                 onChange={e => setForm({ ...form, clientEmail: e.target.value })}
@@ -905,12 +914,23 @@ function AgendaContent() {
                 </div>
               </div>
 
-              <div style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: 14 }}>
-                <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>Responsável</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Avatar name={sheetCall.responsible} size={32} />
-                  <span style={{ fontWeight: 600, color: closerColor(sheetCall.responsible) }}>{sheetCall.responsible}</span>
+              <div style={{ display: 'grid', gridTemplateColumns: sheetCall.sdrNome ? '1fr 1fr' : '1fr', gap: 10 }}>
+                <div style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: 14 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>Responsável</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <Avatar name={sheetCall.responsible} size={32} />
+                    <span style={{ fontWeight: 600, color: closerColor(sheetCall.responsible) }}>{sheetCall.responsible}</span>
+                  </div>
                 </div>
+                {sheetCall.sdrNome && (
+                  <div style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: 14 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>SDR</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <Avatar name={sheetCall.sdrNome} size={32} />
+                      <span style={{ fontWeight: 600 }}>{sheetCall.sdrNome}</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {sheetCall.notes && (
