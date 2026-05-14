@@ -4,7 +4,7 @@ import { Zap, Sun, Moon, ChevronDown, Tag, Settings, LogOut } from 'lucide-react
 import { useTheme } from './ui/ThemeProvider';
 import { Avatar } from './ui/Avatar';
 import { Dropdown } from './ui/Dropdown';
-import { useAuth } from '@/lib/authContext';
+import { useAuth, hasAnyRole } from '@/lib/authContext';
 
 const NAV_ITEMS = [
   { key: 'responsaveis', label: 'Responsáveis' },
@@ -26,11 +26,11 @@ export function Header() {
 
   const nav = [
     ...NAV_ITEMS,
-    ...(['Admin', 'Gerente de Contas'].includes(user?.role ?? '') ? [
+    ...(hasAnyRole(user, ['Admin', 'Gerente de Contas']) ? [
       { key: 'gerente-contas',     label: 'Gerente de Contas' },
       { key: 'relatorio-pipeline', label: 'Pipeline' },
     ] : []),
-    ...(user?.role === 'Admin' ? [
+    ...(hasAnyRole(user, ['Admin']) ? [
       { key: 'pagamentos',    label: 'Pagamentos'    },
       { key: 'configuracoes', label: 'Configurações' },
     ] : []),

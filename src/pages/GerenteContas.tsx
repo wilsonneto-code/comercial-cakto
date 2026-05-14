@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, ChevronLeft, ChevronRight, Video, Trash2, Phone, Calendar, Loader2, CheckCircle, XCircle, Clock, ExternalLink } from 'lucide-react'
-import { useAuth } from '@/lib/authContext'
+import { useAuth, hasAnyRole } from '@/lib/authContext'
 import { Header } from '@/components/Header'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
@@ -59,7 +59,7 @@ export default function GerenteContas() {
   const navigate = useNavigate()
   useEffect(() => { if (!loading && !user) navigate('/login') }, [user, loading, navigate])
   if (loading || !user) return null
-  if (!['Admin', 'Gerente de Contas'].includes(user.role ?? '')) {
+  if (!hasAnyRole(user, ['Admin', 'Gerente de Contas'])) {
     return (
       <>
         <Header />
@@ -131,7 +131,7 @@ function GCContent() {
   // Ativações visíveis: admin vê tudo, gerente vê só as suas
   const visibleActs = useMemo(() => {
     return activations.filter(a => {
-      if (user?.role === 'Admin') return true
+      if (hasAnyRole(user, ['Admin'])) return true
       return a.gerente_id === user?.id
     }).filter(a => !filterGerente || a.gerente_id === filterGerente)
   }, [activations, user, filterGerente])
@@ -151,7 +151,7 @@ function GCContent() {
 
   const visibleMeetings = useMemo(() => {
     return meetings.filter(m => {
-      if (user?.role === 'Admin') return true
+      if (hasAnyRole(user, ['Admin'])) return true
       return m.gerente_id === user?.id
     })
   }, [meetings, user])
@@ -353,7 +353,7 @@ function GCContent() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
           <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-.02em' }}>Gerente de Contas</h1>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {user?.role === 'Admin' && (
+            {hasAnyRole(user, ['Admin']) && (
               <Sel value={filterGerente} onChange={setFilterGerente}
                 options={gerentes.map(g => ({ value: g.id, label: g.name }))}
                 placeholder="Todos os gerentes" />

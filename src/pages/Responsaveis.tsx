@@ -22,6 +22,7 @@ type DbUser = {
   name: string
   email: string
   role: string
+  extra_roles: string[]
   team_id: string | null
   active: boolean
   setor: string | null
@@ -99,7 +100,7 @@ function ResponsaveisContent({ isAdmin }: { isAdmin: boolean }) {
   const [modalTeam, setModalTeam] = useState<DbTeam | null>(null);
   const [modalNewTeam, setModalNewTeam] = useState(false);
   const [teamNameInput, setTeamNameInput] = useState('');
-  const [form, setForm] = useState({ name: '', role: 'Closer', team_id: '', active: true, setor: '' });
+  const [form, setForm] = useState({ name: '', role: 'Closer', extra_roles: [] as string[], team_id: '', active: true, setor: '' });
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -107,7 +108,7 @@ function ResponsaveisContent({ isAdmin }: { isAdmin: boolean }) {
       setIsLoading(true);
       const [{ data: teamsData, error: te }, { data: usersData, error: ue }] = await Promise.all([
         supabase.from('teams').select('id, name').order('name'),
-        supabase.from('users').select('id, name, email, role, team_id, active, setor').order('name'),
+        supabase.from('users').select('id, name, email, role, extra_roles, team_id, active, setor').order('name'),
       ]);
       if (te) toast(te.message, 'error');
       if (ue) toast(ue.message, 'error');
@@ -144,6 +145,7 @@ function ResponsaveisContent({ isAdmin }: { isAdmin: boolean }) {
     const patch = {
       name: capitalize(form.name),
       role: form.role as UserRole,
+      extra_roles: form.extra_roles.filter(r => r !== form.role),
       team_id: form.role === 'Colaborador' ? null : (form.team_id || null),
       setor: form.setor || null,
       active: form.active,
@@ -242,7 +244,7 @@ function ResponsaveisContent({ isAdmin }: { isAdmin: boolean }) {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16, marginBottom: 28 }}>
                   {filteredCommercial.map(u => (
                     <UserCard key={u.id} u={u} isAdmin={isAdmin} teamName={teamName}
-                      onEdit={() => { setForm({ name: u.name, role: u.role, team_id: u.team_id || '', active: u.active, setor: u.setor || '' }); setModalEdit(u); }}
+                      onEdit={() => { setForm({ name: u.name, role: u.role, extra_roles: u.extra_roles ?? [], team_id: u.team_id || '', active: u.active, setor: u.setor || '' }); setModalEdit(u); }}
                       onToggle={() => setModalDeact(u)} />
                   ))}
                   {filteredCommercial.length === 0 && (
@@ -262,7 +264,7 @@ function ResponsaveisContent({ isAdmin }: { isAdmin: boolean }) {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
                   {filteredColaboradores.map(u => (
                     <UserCard key={u.id} u={u} isAdmin={isAdmin} teamName={teamName}
-                      onEdit={() => { setForm({ name: u.name, role: u.role, team_id: u.team_id || '', active: u.active, setor: u.setor || '' }); setModalEdit(u); }}
+                      onEdit={() => { setForm({ name: u.name, role: u.role, extra_roles: u.extra_roles ?? [], team_id: u.team_id || '', active: u.active, setor: u.setor || '' }); setModalEdit(u); }}
                       onToggle={() => setModalDeact(u)} />
                   ))}
                   {filteredColaboradores.length === 0 && (
@@ -368,6 +370,35 @@ function ResponsaveisContent({ isAdmin }: { isAdmin: boolean }) {
                     placeholder="Sem time" />
                 </Field>
               )}
+            </div>
+            {/* Cargos adicionais */}
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
+                Cargos Adicionais
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {ROLES.filter(r => r !== form.role && r !== 'Colaborador').map(r => {
+                  const checked = form.extra_roles.includes(r)
+                  return (
+                    <label key={r} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                      padding: '5px 12px', borderRadius: 20, border: `1px solid ${checked ? 'var(--action)' : 'var(--border)'}`,
+                      background: checked ? 'color-mix(in srgb, var(--action) 12%, var(--bg-card2))' : 'var(--bg-card2)',
+                      fontSize: 13, fontWeight: checked ? 700 : 400, color: checked ? 'var(--action)' : 'var(--text2)',
+                      transition: 'all .15s' }}>
+                      <input type="checkbox" checked={checked}
+                        onChange={e => setForm(p => ({
+                          ...p,
+                          extra_roles: e.target.checked ? [...p.extra_roles, r] : p.extra_roles.filter(x => x !== r)
+                        }))}
+                        style={{ display: 'none' }} />
+                      {r}
+                    </label>
+                  )
+                })}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 6 }}>
+                Cargos extras dão acesso às funcionalidades do cargo sem alterar o cargo principal.
+              </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <Toggle value={form.active} onChange={v => setForm(p => ({ ...p, active: v }))} />
