@@ -129,20 +129,20 @@ export default function Ranking() {
           taxaRealizacao: taxaReal, taxaAtivacao: 0,
         }
       })
-      .sort((a, b) => b.calls - a.calls || b.activations - a.activations)
+      .sort((a, b) => b.realizadas - a.realizadas || b.calls - a.calls)
   }, [users, teams, activations, calls, filterTeam])
 
   const closerTop3   = closerRanking.slice(0, 3)
   const sdrTop3      = sdrRanking.slice(0, 3)
   const closerChart  = closerRanking.slice(0, 6).map(r => ({ label: r.name.split(' ')[0], value: r.activations }))
-  const sdrChart     = sdrRanking.slice(0, 6).map(r => ({ label: r.name.split(' ')[0], value: r.activations }))
+  const sdrChart     = sdrRanking.slice(0, 6).map(r => ({ label: r.name.split(' ')[0], value: r.realizadas }))
 
   const makeSparkline = (seed: number) =>
     Array.from({ length: 14 }, (_, i) => ({
       value: Math.max(0, Math.round((seed / 14) + Math.sin(i * seed * 0.7) * (seed * 0.3))),
     }))
 
-  function Podium({ top3, color }: { top3: RankEntry[]; color: string }) {
+  function Podium({ top3, color, valueKey = 'activations', valueLabel = 'ativações' }: { top3: RankEntry[]; color: string; valueKey?: keyof RankEntry; valueLabel?: string }) {
     return (
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: 16, minHeight: 220 }}>
         {[1, 0, 2].map(pos => {
@@ -154,7 +154,7 @@ export default function Ranking() {
               <Avatar name={r.name} size={pos === 0 ? 52 : 44} />
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontWeight: 700, fontSize: 14 }}>{r.name.split(' ')[0]}</div>
-                <div style={{ fontSize: 12, color: 'var(--text2)' }}>{r.activations} ativações</div>
+                <div style={{ fontSize: 12, color: 'var(--text2)' }}>{r[valueKey] as number} {valueLabel}</div>
               </div>
               <div style={{
                 width: 100, height: PODIUM_HEIGHTS[pos],
@@ -313,7 +313,7 @@ export default function Ranking() {
             ) : (
               <section>
                 <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 32, marginBottom: 16 }}>
-                  <Podium top3={sdrTop3} color="#0891b2" />
+                  <Podium top3={sdrTop3} color="#0891b2" valueKey="realizadas" valueLabel="realizadas" />
                 </div>
                 {sdrChart.length > 0 && (
                   <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 20, marginBottom: 16 }}>
