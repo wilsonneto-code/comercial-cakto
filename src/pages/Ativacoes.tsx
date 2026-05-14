@@ -431,7 +431,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
           placeholder="Ex: 75000" />
         {form.faturamento_mensal && (() => {
           const v = parseFloat(form.faturamento_mensal)
-          const tier = v < 50000 ? 'Starter' : v <= 250000 ? 'Growth' : 'Enterprise'
+          const tier = v <= 50000 ? 'Starter' : v <= 250000 ? 'Growth' : 'Enterprise'
           const color = tier === 'Starter' ? '#07BA1C' : tier === 'Growth' ? '#2BB9FF' : '#BF5AF2'
           return (
             <div style={{ marginTop: 6, fontSize: 12, color, fontWeight: 700 }}>
@@ -551,7 +551,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
           placeholder="Ex: 75000" />
         {form.faturamento_mensal && (() => {
           const v = parseFloat(form.faturamento_mensal)
-          const tier = v < 50000 ? 'Starter' : v <= 250000 ? 'Growth' : 'Enterprise'
+          const tier = v <= 50000 ? 'Starter' : v <= 250000 ? 'Growth' : 'Enterprise'
           const color = tier === 'Starter' ? '#07BA1C' : tier === 'Growth' ? '#2BB9FF' : '#BF5AF2'
           return (
             <div style={{ marginTop: 6, fontSize: 12, color, fontWeight: 700 }}>

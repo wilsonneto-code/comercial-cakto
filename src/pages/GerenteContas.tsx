@@ -45,7 +45,7 @@ type Meeting = {
 
 function funil(fat: number | null): 'Starter' | 'Growth' | 'Enterprise' | null {
   if (fat === null || fat === undefined) return null
-  if (fat < 50000)  return 'Starter'
+  if (fat <= 50000)  return 'Starter'
   if (fat <= 250000) return 'Growth'
   return 'Enterprise'
 }
