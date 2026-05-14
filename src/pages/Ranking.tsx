@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Crown, ArrowUp, ArrowDown, Loader2 } from 'lucide-react'
+import { useAuth } from '@/lib/authContext'
 import { useToast } from '@/components/ui/Toast'
 import { Header } from '@/components/Header'
 import { Avatar } from '@/components/ui/Avatar'
@@ -33,6 +34,7 @@ const DEFAULT_RANGE: DateRange = {
 }
 
 export default function Ranking() {
+  const { user } = useAuth()
   const toast = useToast()
   const [users,       setUsers]       = useState<DbUser[]>([])
   const [teams,       setTeams]       = useState<DbTeam[]>([])
@@ -41,8 +43,14 @@ export default function Ranking() {
   const [isLoading,   setIsLoading]   = useState(true)
   const [filterTeam,  setFilterTeam]  = useState('')
   const [sheetUser,   setSheetUser]   = useState<RankEntry | null>(null)
-  const [viewMode,    setViewMode]    = useState<'closers' | 'sdr'>('closers')
   const [dateRange,   setDateRange]   = useState<DateRange>(DEFAULT_RANGE)
+
+  // Perfil determina qual aba é visível
+  const isCloser  = user?.role === 'Closer'
+  const isSdr     = user?.role === 'SDR'
+  const isAdmin   = ['Admin', 'Gerente de Contas', 'Supervisor', 'Head Comercial'].includes(user?.role ?? '')
+  const defaultView: 'closers' | 'sdr' = isSdr ? 'sdr' : 'closers'
+  const [viewMode, setViewMode] = useState<'closers' | 'sdr'>(defaultView)
 
   useEffect(() => {
     if (!dateRange.startDate || !dateRange.endDate) return
@@ -323,9 +331,11 @@ export default function Ranking() {
             <DateFilter value="Mês Atual" onChange={setDateRange} />
             <Sel value={filterTeam} onChange={setFilterTeam}
               options={teams.map(t => t.name)} placeholder="Todos os times" />
-            <Sel value={viewMode} onChange={v => setViewMode(v as 'closers' | 'sdr')}
-              options={[{ value: 'closers', label: 'Closers' }, { value: 'sdr', label: 'SDR' }]}
-              placeholder="" />
+            {isAdmin && (
+              <Sel value={viewMode} onChange={v => setViewMode(v as 'closers' | 'sdr')}
+                options={[{ value: 'closers', label: 'Closers' }, { value: 'sdr', label: 'SDR' }]}
+                placeholder="" />
+            )}
           </div>
         </div>
 
