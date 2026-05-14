@@ -28,6 +28,7 @@ export function Header() {
     ...NAV_ITEMS,
     ...(hasAnyRole(user, ['Admin', 'Gerente de Contas']) ? [
       { key: 'gerente-contas',     label: 'Gerente de Contas' },
+      { key: 'carteiras',          label: 'Carteiras' },
       { key: 'relatorio-pipeline', label: 'Pipeline' },
     ] : []),
     ...(hasAnyRole(user, ['Admin']) ? [

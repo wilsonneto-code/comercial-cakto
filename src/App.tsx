@@ -17,6 +17,7 @@ import DashboardTime from './pages/DashboardTime'
 import DashboardLifetime from './pages/DashboardLifetime'
 import PublicForm from './pages/PublicForm'
 import Pagamentos from './pages/Pagamentos'
+import Carteiras from './pages/Carteiras'
 
 const MAIN_DOMAINS = [
   'localhost',
@@ -75,6 +76,7 @@ export default function App() {
       <Route path="/relatorio-pipeline" element={<ProtectedRoute><RelatorioDataCrazy /></ProtectedRoute>} />
       <Route path="/gerente-contas" element={<ProtectedRoute><GerenteContas /></ProtectedRoute>} />
       <Route path="/pagamentos" element={<ProtectedRoute><Pagamentos /></ProtectedRoute>} />
+      <Route path="/carteiras" element={<ProtectedRoute><Carteiras /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
