@@ -27,7 +27,6 @@ export function Header() {
   const nav = [
     ...NAV_ITEMS,
     ...(['Admin', 'Gerente de Contas'].includes(user?.role ?? '') ? [
-      { key: 'metabase',           label: 'Relatórios' },
       { key: 'relatorio-pipeline', label: 'Pipeline' },
     ] : []),
     ...(user?.role === 'Admin' ? [
