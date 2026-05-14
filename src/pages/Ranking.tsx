@@ -141,8 +141,9 @@ export default function Ranking() {
 
   const closerTop3   = closerRanking.slice(0, 3)
   const sdrTop3      = sdrRanking.slice(0, 3)
-  const closerChart  = closerRanking.slice(0, 6).map(r => ({ label: r.name.split(' ')[0], value: r.activations }))
-  const sdrChart     = sdrRanking.slice(0, 6).map(r => ({ label: r.name.split(' ')[0], value: r.realizadas }))
+  const closerChartAtv  = closerRanking.slice(0, 6).map(r => ({ label: r.name.split(' ')[0], value: r.activations }))
+  const closerChartReal = closerRanking.slice(0, 6).map(r => ({ label: r.name.split(' ')[0], value: r.realizadas }))
+  const sdrChart        = sdrRanking.slice(0, 6).map(r => ({ label: r.name.split(' ')[0], value: r.realizadas }))
 
   const makeSparkline = (seed: number) =>
     Array.from({ length: 14 }, (_, i) => ({
@@ -341,10 +342,16 @@ export default function Ranking() {
                 <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 32, marginBottom: 16 }}>
                   <Podium top3={closerTop3} color="var(--action)" />
                 </div>
-                {closerChart.length > 0 && (
-                  <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 20, marginBottom: 16 }}>
-                    <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 16 }}>Ativações por Closer</div>
-                    <BarChartV data={closerChart} height={180} />
+                {closerChartAtv.length > 0 && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+                    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }}>
+                      <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 16 }}>Ativações por Closer</div>
+                      <BarChartV data={closerChartAtv} height={180} color1="#07BA1C" color2="#48E895" />
+                    </div>
+                    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }}>
+                      <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 16 }}>Reuniões Realizadas por Closer</div>
+                      <BarChartV data={closerChartReal} height={180} color1="#2BB9FF" color2="#6B78FF" />
+                    </div>
                   </div>
                 )}
                 <RankingTable ranking={closerRanking} title="Ranking Closers" showCalls />
@@ -357,7 +364,7 @@ export default function Ranking() {
                 {sdrChart.length > 0 && (
                   <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 20, marginBottom: 16 }}>
                     <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 16 }}>Ativações por SDR</div>
-                    <BarChartV data={sdrChart} height={180} />
+                    <BarChartV data={sdrChart} height={180} color1="#07BA1C" color2="#48E895" />
                   </div>
                 )}
                 <RankingTable ranking={sdrRanking} title="Ranking SDR" showSdrCalls />
