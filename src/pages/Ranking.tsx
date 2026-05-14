@@ -87,11 +87,15 @@ export default function Ranking() {
         const taxaReal   = uCalls.length > 0 ? Math.round((realizadas / uCalls.length) * 100) : 0
         const taxaAtiv   = realizadas > 0 ? Math.round((ativadas / realizadas) * 100) : 0
         const atv        = actCounts[u.id] || 0
+        // Score: média entre % da meta de 160 realizadas e % da meta de 30% conversão
+        const scoreReal  = Math.min(100, Math.round((realizadas / 160) * 100))
+        const scoreConv  = Math.min(100, Math.round((taxaAtiv / 30) * 100))
+        const score      = Math.round((scoreReal + scoreConv) / 2)
         return {
           userId: u.id, name: u.name, role: u.role,
           team: teams.find(t => t.id === u.team_id)?.name || '—',
           activations: atv,
-          score: Math.min(100, atv * 10),
+          score,
           variation: 0,
           calls: uCalls.length,
           realizadas, noshow, canceladas,
@@ -193,10 +197,12 @@ export default function Ranking() {
                 {showCalls && <>
                   <th>Calls</th>
                   <th>Realizadas</th>
+                  <th>Meta 160</th>
                   <th>No-show</th>
                   <th>Canceladas</th>
                   <th>% Realização</th>
                   <th>% Ativação</th>
+                  <th>Meta 30%</th>
                 </>}
                 {showSdrCalls && <>
                   <th>Agendadas</th>
@@ -212,7 +218,7 @@ export default function Ranking() {
             </thead>
             <tbody>
               {ranking.length === 0 && (
-                <tr><td colSpan={showCalls ? 11 : showSdrCalls ? 12 : 5} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32 }}>
+                <tr><td colSpan={showCalls ? 13 : showSdrCalls ? 12 : 5} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32 }}>
                   Nenhum dado disponível.
                 </td></tr>
               )}
@@ -257,20 +263,32 @@ export default function Ranking() {
                   </>}
                   {showCalls && <>
                     <td style={{ fontWeight: 600 }}>{r.calls}</td>
-                    <td style={{ fontWeight: 600, color: 'var(--green)' }}>{r.realizadas}</td>
+                    <td style={{ fontWeight: 700, color: r.realizadas >= 160 ? 'var(--green)' : 'var(--text)' }}>{r.realizadas}</td>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ width: 48, background: 'var(--bg-card2)', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${Math.min(100, Math.round(r.realizadas/160*100))}%`, background: r.realizadas >= 160 ? 'var(--green)' : 'var(--action)', borderRadius: 4 }} />
+                        </div>
+                        <span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600 }}>{Math.min(100, Math.round(r.realizadas/160*100))}%</span>
+                      </div>
+                    </td>
                     <td style={{ fontWeight: 600, color: 'var(--orange)' }}>{r.noshow}</td>
                     <td style={{ fontWeight: 600, color: 'var(--red)' }}>{r.canceladas}</td>
                     <td>
-                      <span style={{
-                        fontWeight: 700, fontSize: 13,
-                        color: r.taxaRealizacao >= 70 ? 'var(--green)' : r.taxaRealizacao >= 40 ? 'var(--orange)' : 'var(--red)'
-                      }}>{r.taxaRealizacao}%</span>
+                      <span style={{ fontWeight: 700, fontSize: 13, color: r.taxaRealizacao >= 70 ? 'var(--green)' : r.taxaRealizacao >= 40 ? 'var(--orange)' : 'var(--red)' }}>
+                        {r.taxaRealizacao}%
+                      </span>
+                    </td>
+                    <td style={{ fontWeight: 700, color: r.taxaAtivacao >= 30 ? 'var(--green)' : r.taxaAtivacao >= 15 ? 'var(--orange)' : 'var(--red)' }}>
+                      {r.taxaAtivacao}%
                     </td>
                     <td>
-                      <span style={{
-                        fontWeight: 700, fontSize: 13,
-                        color: r.taxaAtivacao >= 50 ? 'var(--green)' : r.taxaAtivacao >= 25 ? 'var(--orange)' : 'var(--red)'
-                      }}>{r.taxaAtivacao}%</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ width: 48, background: 'var(--bg-card2)', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${Math.min(100, Math.round(r.taxaAtivacao/30*100))}%`, background: r.taxaAtivacao >= 30 ? 'var(--green)' : 'var(--purple)', borderRadius: 4 }} />
+                        </div>
+                        <span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600 }}>{Math.min(100, Math.round(r.taxaAtivacao/30*100))}%</span>
+                      </div>
                     </td>
                   </>}
                   <td>
