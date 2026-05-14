@@ -108,26 +108,25 @@ export default function Ranking() {
     const actCounts: Record<string, number> = {}
     activations.forEach(a => { if (a.sdr_id) actCounts[a.sdr_id] = (actCounts[a.sdr_id] || 0) + 1 })
 
-    // Calls agendadas pelo SDR (por nome — campo sdr_nome na tabela calls)
-    const callsBySdrName: Record<string, number> = {}
-    calls.forEach(c => {
-      if (c.sdr_nome) callsBySdrName[c.sdr_nome] = (callsBySdrName[c.sdr_nome] || 0) + 1
-    })
-
     return users
       .filter(u => u.role === 'SDR')
       .filter(u => !filterTeam || teams.find(t => t.id === u.team_id)?.name === filterTeam)
       .map(u => {
-        const atv       = actCounts[u.id] || 0
-        const callsAgd  = callsBySdrName[u.name] || 0
+        const atv        = actCounts[u.id] || 0
+        const uCalls     = calls.filter(c => c.sdr_nome === u.name)
+        const agendadas  = uCalls.length
+        const realizadas = uCalls.filter(c => c.status === 'Realizada').length
+        const noshow     = uCalls.filter(c => c.status === 'No-show').length
+        const canceladas = uCalls.filter(c => c.status === 'Cancelada').length
+        const taxaReal   = agendadas > 0 ? Math.round((realizadas / agendadas) * 100) : 0
         return {
           userId: u.id, name: u.name, role: u.role,
           team: teams.find(t => t.id === u.team_id)?.name || '—',
           activations: atv,
           score: Math.min(100, atv * 10),
           variation: 0,
-          calls: callsAgd, realizadas: 0, noshow: 0, canceladas: 0,
-          taxaRealizacao: 0, taxaAtivacao: 0,
+          calls: agendadas, realizadas, noshow, canceladas,
+          taxaRealizacao: taxaReal, taxaAtivacao: 0,
         }
       })
       .sort((a, b) => b.calls - a.calls || b.activations - a.activations)
@@ -196,13 +195,19 @@ export default function Ranking() {
                   <th>% Realização</th>
                   <th>% Ativação</th>
                 </>}
-                {showSdrCalls && <th>Calls Agendadas</th>}
+                {showSdrCalls && <>
+                  <th>Agendadas</th>
+                  <th>Realizadas</th>
+                  <th>No-show</th>
+                  <th>Canceladas</th>
+                  <th>% Realização</th>
+                </>}
                 <th>Score</th>
               </tr>
             </thead>
             <tbody>
               {ranking.length === 0 && (
-                <tr><td colSpan={showCalls ? 11 : showSdrCalls ? 6 : 5} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32 }}>
+                <tr><td colSpan={showCalls ? 11 : showSdrCalls ? 10 : 5} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32 }}>
                   Nenhum dado disponível.
                 </td></tr>
               )}
@@ -217,9 +222,18 @@ export default function Ranking() {
                   </td>
                   <td style={{ fontSize: 13, color: 'var(--text2)' }}>{r.team}</td>
                   <td style={{ fontWeight: 700 }}>{r.activations}</td>
-                  {showSdrCalls && (
+                  {showSdrCalls && <>
                     <td style={{ fontWeight: 700, color: 'var(--action)' }}>{r.calls}</td>
-                  )}
+                    <td style={{ fontWeight: 600, color: 'var(--green)' }}>{r.realizadas}</td>
+                    <td style={{ fontWeight: 600, color: 'var(--orange)' }}>{r.noshow}</td>
+                    <td style={{ fontWeight: 600, color: 'var(--red)' }}>{r.canceladas}</td>
+                    <td>
+                      <span style={{
+                        fontWeight: 700, fontSize: 13,
+                        color: r.taxaRealizacao >= 70 ? 'var(--green)' : r.taxaRealizacao >= 40 ? 'var(--orange)' : 'var(--red)'
+                      }}>{r.taxaRealizacao}%</span>
+                    </td>
+                  </>}
                   {showCalls && <>
                     <td style={{ fontWeight: 600 }}>{r.calls}</td>
                     <td style={{ fontWeight: 600, color: 'var(--green)' }}>{r.realizadas}</td>
