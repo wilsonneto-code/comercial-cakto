@@ -140,6 +140,9 @@ function GCContent() {
   const [modalClient,  setModalClient]  = useState<DbActivation | null>(null)
   const [clientForm,   setClientForm]   = useState({ faturamento_mensal: '', gerente_id: '' })
   const [meetForm,     setMeetForm]     = useState({ ...EMPTY_MEET })
+  // Modal simplificado para agendar reunião direto do card
+  const [quickMeetClient, setQuickMeetClient] = useState<DbActivation | null>(null)
+  const [quickMeetForm,   setQuickMeetForm]   = useState({ date: '', time: '', endTime: '' })
 
   useEffect(() => {
     async function load() {
@@ -206,6 +209,58 @@ function GCContent() {
     const { error } = await supabase.from('activations').update({ gc_status: status }).eq('id', id)
     if (error) { toast(error.message, 'error'); return }
     setActs(p => p.map(a => a.id === id ? { ...a, gc_status: status } : a))
+  }
+
+  async function saveQuickMeeting() {
+    if (!quickMeetClient || !quickMeetForm.date || !quickMeetForm.time) {
+      toast('Preencha data e horário.', 'error'); return
+    }
+    setIsSaving(true)
+    const clientFirst = quickMeetClient.client.split(' ')[0]
+    const gerenteName = users.find(u => u.id === quickMeetClient.gerente_id)?.name || user?.name || '—'
+    const row = {
+      title:         `Reunião com ${quickMeetClient.client}`,
+      date:          quickMeetForm.date,
+      time:          quickMeetForm.time,
+      end_time:      quickMeetForm.endTime || null,
+      gerente_id:    quickMeetClient.gerente_id || user?.id,
+      activation_id: quickMeetClient.id,
+      client_email:  quickMeetClient.email,
+      status:        'Agendada',
+      notes:         '',
+    }
+    const { data, error } = await supabase.from('followup_meetings').insert(row).select().single()
+    setIsSaving(false)
+    if (error) { toast(error.message, 'error'); return }
+    const newM: Meeting = {
+      id: (data as any).id, activation_id: quickMeetClient.id,
+      gerente_id: row.gerente_id || null, title: row.title,
+      date: row.date, time: row.time, endTime: quickMeetForm.endTime,
+      status: 'Agendada', notes: '', clientEmail: quickMeetClient.email,
+      google_event_id: '', meet_link: '', gerenteName,
+    }
+    setMeetings(p => [...p, newM])
+    toast('Reunião agendada!', 'success')
+    setQuickMeetClient(null)
+    setQuickMeetForm({ date: '', time: '', endTime: '' })
+
+    // Google Calendar
+    supabase.functions.invoke('schedule-call', {
+      body: {
+        action: 'create', title: row.title,
+        date: row.date, time: row.time, end_time: quickMeetForm.endTime || '',
+        closerName: gerenteName, closerEmail: user?.email || '',
+        clientEmail: quickMeetClient.email, notes: '',
+      },
+    }).then(async ({ data: fnData, error: fnErr }) => {
+      if (fnErr) return
+      const { eventId, meetLink } = (fnData || {}) as any
+      if (eventId) {
+        await supabase.from('followup_meetings').update({ google_event_id: eventId, meet_link: meetLink ?? '' }).eq('id', newM.id)
+        setMeetings(p => p.map(m => m.id === newM.id ? { ...m, google_event_id: eventId, meet_link: meetLink ?? '' } : m))
+        toast('Google Calendar sincronizado ✓', 'success')
+      }
+    })
   }
 
   async function confirmWelcomeSent(id: string) {
@@ -550,7 +605,7 @@ function GCContent() {
                                   ← Voltar
                                 </button>
                               )}
-                              <button onClick={() => openNewMeet(a.email, a.id)}
+                              <button onClick={() => { setQuickMeetClient(a); setQuickMeetForm({ date: '', time: '', endTime: '' }) }}
                                 style={{ fontSize: 10, padding: '3px 8px', borderRadius: 6, border: `1px solid ${col.color}`, background: `color-mix(in srgb, ${col.color} 10%, var(--bg-card))`, cursor: 'pointer', color: col.color, fontFamily: 'inherit', fontWeight: 700 }}>
                                 + Reunião
                               </button>
@@ -692,6 +747,48 @@ function GCContent() {
             </div>
           </div>
         )}
+
+        {/* ── Modal: Agendar reunião rápida ── */}
+        <Modal open={!!quickMeetClient} onClose={() => setQuickMeetClient(null)}
+          title={`Agendar Reunião — ${quickMeetClient?.client}`}>
+          {quickMeetClient && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ padding: '12px 16px', borderRadius: 10, background: 'var(--bg-card2)', fontSize: 13 }}>
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>{quickMeetClient.client}</div>
+                <div style={{ color: 'var(--text2)', fontSize: 12 }}>{quickMeetClient.email}</div>
+                {quickMeetClient.phone && <div style={{ color: 'var(--text2)', fontSize: 12 }}>{quickMeetClient.phone}</div>}
+                {quickMeetClient.gerente_id && (
+                  <div style={{ color: 'var(--action)', fontSize: 12, marginTop: 4 }}>
+                    GC: {users.find(u => u.id === quickMeetClient.gerente_id)?.name}
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                <Field label="Data *">
+                  <input className="inp" type="date" value={quickMeetForm.date}
+                    onChange={e => setQuickMeetForm(p => ({ ...p, date: e.target.value }))} />
+                </Field>
+                <Field label="Início *">
+                  <input className="inp" type="time" value={quickMeetForm.time}
+                    onChange={e => setQuickMeetForm(p => ({ ...p, time: e.target.value }))} />
+                </Field>
+                <Field label="Fim">
+                  <input className="inp" type="time" value={quickMeetForm.endTime}
+                    onChange={e => setQuickMeetForm(p => ({ ...p, endTime: e.target.value }))} />
+                </Field>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text2)', padding: '8px 12px', borderRadius: 8, background: 'var(--bg-card2)' }}>
+                O título, cliente e gerente serão preenchidos automaticamente. A reunião será sincronizada com o Google Calendar.
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <Button variant="secondary" onClick={() => setQuickMeetClient(null)}>Cancelar</Button>
+                <Button onClick={saveQuickMeeting} disabled={isSaving || !quickMeetForm.date || !quickMeetForm.time}>
+                  {isSaving ? 'Agendando…' : 'Agendar Reunião'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </Modal>
 
         {/* ── Modal: Editar cliente ── */}
         <Modal open={!!modalClient} onClose={() => setModalClient(null)} title={`Cliente — ${modalClient?.client}`}>
