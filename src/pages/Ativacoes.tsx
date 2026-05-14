@@ -29,7 +29,7 @@ type DbTeam  = { id: string; name: string }
 type AuthUser = { id: string; name: string; role: string; team_id: string | null }
 
 const CHANNELS: ActivationChannel[] = ['Inbound', 'Outbound', 'Indicação']
-const EMPTY_FORM = { client: '', email: '', channel: 'Inbound', responsible: '', date: '', phone: '+55 ', sdr_id: '', notes: '', images: [] as File[] }
+const EMPTY_FORM = { client: '', email: '', channel: 'Inbound', responsible: '', date: '', phone: '+55 ', sdr_id: '', notes: '', images: [] as File[], faturamento_mensal: '' }
 const PER_PAGE = 5
 
 const DEFAULT_RANGE: DateRange = {
@@ -230,6 +230,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
         channel: form.channel as ActivationChannel, responsible: form.responsible, date: form.date,
         sdr_id: form.sdr_id || null, sdr_nome: sdrUser?.name || null,
         notes: form.notes || null,
+        faturamento_mensal: form.faturamento_mensal ? parseFloat(form.faturamento_mensal.replace(/\./g,'').replace(',','.')) || null : null,
         ...(imageUrls.length > 0 ? { image_urls: imageUrls } : {}),
       }
       const { error } = await supabase.from('activations').update(patch).eq('id', modalEdit.id)
@@ -303,11 +304,12 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
         client: capitalize(form.client), email: emailSanitized, phone: form.phone || null,
         channel: form.channel as ActivationChannel, responsible: form.responsible,
         date: form.date, time,
-        sdr_id:     form.sdr_id || null,
-        sdr_nome:   sdrUser?.name || null,
-        sem_sdr:    !form.sdr_id,
-        notes:      form.notes || null,
-        image_urls: imageUrls,
+        sdr_id:             form.sdr_id || null,
+        sdr_nome:           sdrUser?.name || null,
+        sem_sdr:            !form.sdr_id,
+        notes:              form.notes || null,
+        image_urls:         imageUrls,
+        faturamento_mensal: form.faturamento_mensal ? parseFloat(form.faturamento_mensal.replace(/\./g,'').replace(',','.')) || null : null,
       }
       const { data, error } = await supabase.from('activations').insert(row).select().single()
       setIsSaving(false)
@@ -423,6 +425,21 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
         <Sel value={form.channel} onChange={v => setForm(p => ({ ...p, channel: v }))}
           options={CHANNELS} placeholder="" />
       </Field>
+      <Field label="Faturamento Mensal Esperado (R$)">
+        <input className="inp" type="number" value={form.faturamento_mensal}
+          onChange={e => setForm(p => ({ ...p, faturamento_mensal: e.target.value }))}
+          placeholder="Ex: 75000" />
+        {form.faturamento_mensal && (() => {
+          const v = parseFloat(form.faturamento_mensal)
+          const tier = v < 50000 ? 'Starter' : v <= 250000 ? 'Growth' : 'Enterprise'
+          const color = tier === 'Starter' ? '#07BA1C' : tier === 'Growth' ? '#2BB9FF' : '#BF5AF2'
+          return (
+            <div style={{ marginTop: 6, fontSize: 12, color, fontWeight: 700 }}>
+              Funil: {tier} — {v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}/mês
+            </div>
+          )
+        })()}
+      </Field>
       <Field label="Notas">
         <textarea className="inp" rows={3} value={form.notes}
           onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
@@ -528,6 +545,21 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
         </Field>
       </div>
 
+      <Field label="Faturamento Mensal Esperado (R$)">
+        <input className="inp" type="number" value={form.faturamento_mensal}
+          onChange={e => setForm(p => ({ ...p, faturamento_mensal: e.target.value }))}
+          placeholder="Ex: 75000" />
+        {form.faturamento_mensal && (() => {
+          const v = parseFloat(form.faturamento_mensal)
+          const tier = v < 50000 ? 'Starter' : v <= 250000 ? 'Growth' : 'Enterprise'
+          const color = tier === 'Starter' ? '#07BA1C' : tier === 'Growth' ? '#2BB9FF' : '#BF5AF2'
+          return (
+            <div style={{ marginTop: 6, fontSize: 12, color, fontWeight: 700 }}>
+              Funil: {tier} — {v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}/mês
+            </div>
+          )
+        })()}
+      </Field>
       <Field label="Notas">
         <textarea className="inp" rows={3} value={form.notes}
           onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
