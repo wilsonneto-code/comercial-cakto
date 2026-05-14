@@ -19,11 +19,13 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
 
   const url    = new URL(req.url)
-  const action = url.searchParams.get('action')
+  // Detecta callback pelo parâmetro 'code' (Google não aceita query params na redirect URI)
+  const code_param = url.searchParams.get('code')
+  const action = code_param ? 'callback' : (url.searchParams.get('action') ?? '')
 
   const CLIENT_ID     = Deno.env.get('GOOGLE_CLIENT_ID')     ?? ''
   const CLIENT_SECRET = Deno.env.get('GOOGLE_CLIENT_SECRET') ?? ''
-  const REDIRECT_URI  = `${Deno.env.get('SUPABASE_URL')}/functions/v1/google-oauth?action=callback`
+  const REDIRECT_URI  = 'https://dugjrmjlcmkeyjjbqxxk.supabase.co/functions/v1/google-oauth'
   const APP_URL       = Deno.env.get('APP_URL') ?? 'https://www.caktocomercial.site'
 
   const json = (b: unknown, s = 200) =>
@@ -54,7 +56,7 @@ serve(async (req) => {
 
   // ── Callback OAuth ────────────────────────────────────────────────────────
   if (action === 'callback') {
-    const code   = url.searchParams.get('code')
+    const code   = code_param ?? url.searchParams.get('code')
     const userId = url.searchParams.get('state')
     const error  = url.searchParams.get('error')
 

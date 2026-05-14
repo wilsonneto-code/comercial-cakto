@@ -91,7 +91,7 @@ serve(async (req) => {
     }
 
     // ── Monta evento (CREATE / UPDATE) ────────────────────────────────────────
-    const { title, date, time, end_time, closerName, closerEmail, clientEmail, notes } = body
+    const { title, date, time, end_time, closerName, clientEmail, notes } = body
     const tz      = '-03:00'
     const timeStr = time || '09:00'
 

@@ -30,7 +30,7 @@ const MEET_STATUS_COLORS: Record<string, string> = {
   'No-show': 'var(--orange)',
 }
 
-type DbUser       = { id: string; name: string; role: string }
+type DbUser       = { id: string; name: string; role: string; email?: string }
 const KANBAN_COLS = [
   { key: 'Cliente novo',              color: '#6B78FF' },
   { key: 'Cliente atendido',          color: '#2BB9FF' },
@@ -187,7 +187,7 @@ function GCContent() {
     async function load() {
       setIsLoading(true)
       const [{ data: usrs }, { data: acts }, { data: mtgs }] = await Promise.all([
-        supabase.from('users').select('id,name,role').order('name'),
+        supabase.from('users').select('id,name,role,email').order('name'),
         supabase.from('activations').select('id,client,email,phone,responsible,date,notes,faturamento_mensal,gerente_id,gc_status,welcome_sent').order('date', { ascending: false }),
         supabase.from('followup_meetings').select('*').order('date').order('time'),
       ])
@@ -256,7 +256,9 @@ function GCContent() {
     }
     setIsSaving(true)
     const clientFirst = quickMeetClient.client.split(' ')[0]
-    const gerenteName = users.find(u => u.id === quickMeetClient.gerente_id)?.name || user?.name || '—'
+    const gerenteUser  = users.find(u => u.id === quickMeetClient.gerente_id)
+    const gerenteName  = gerenteUser?.name || user?.name || '—'
+    const gerenteEmail = gerenteUser?.email || user?.email || ''
     const row = {
       title:         `Reunião com ${quickMeetClient.client}`,
       date:          quickMeetForm.date,
@@ -288,12 +290,13 @@ function GCContent() {
       body: {
         action: 'create', title: row.title,
         date: row.date, time: row.time, end_time: quickMeetForm.endTime || '',
-        closerName: gerenteName, closerEmail: user?.email || '',
+        closerName: gerenteName, closerEmail: gerenteEmail,
         clientEmail: quickMeetClient.email, notes: '',
       },
     }).then(async ({ data: fnData, error: fnErr }) => {
-      if (fnErr) return
-      const { eventId, meetLink } = (fnData || {}) as any
+      if (fnErr) { toast(`Erro GCal: ${(fnErr as any)?.message ?? JSON.stringify(fnErr)}`, 'error'); return }
+      const { eventId, meetLink, error: fnBodyErr } = (fnData || {}) as any
+      if (fnBodyErr) { toast(`Erro GCal: ${fnBodyErr}`, 'error'); return }
       if (eventId) {
         await supabase.from('followup_meetings').update({ google_event_id: eventId, meet_link: meetLink ?? '' }).eq('id', newM.id)
         setMeetings(p => p.map(m => m.id === newM.id ? { ...m, google_event_id: eventId, meet_link: meetLink ?? '' } : m))
@@ -373,17 +376,18 @@ function GCContent() {
         body: {
           action: 'create', title: meetForm.title, date: meetForm.date,
           time: meetForm.time || '09:00', end_time: meetForm.endTime || '',
-          closerName: gerenteName, closerEmail: user?.email || '',
+          closerName: gerenteName, closerEmail: gerenteEmail,
           clientEmail: meetForm.clientEmail || '', notes: meetForm.notes,
         },
       }).then(async ({ data: fnData, error: fnErr }) => {
-        if (fnErr) { toast('Salvo, mas falhou no Google Calendar', 'error'); return }
-        const { eventId, meetLink } = (fnData || {}) as any
+        if (fnErr) { toast(`Erro GCal: ${(fnErr as any)?.message ?? JSON.stringify(fnErr)}`, 'error'); return }
+        const { eventId, meetLink, error: fnBodyErr } = (fnData || {}) as any
+        if (fnBodyErr) { toast(`Erro GCal: ${fnBodyErr}`, 'error'); return }
         if (eventId) {
           await supabase.from('followup_meetings').update({ google_event_id: eventId, meet_link: meetLink ?? '' }).eq('id', newM.id)
           setMeetings(p => p.map(m => m.id === newM.id ? { ...m, google_event_id: eventId, meet_link: meetLink ?? '' } : m))
+          toast('Google Calendar sincronizado ✓', 'success')
         }
-        toast('Google Calendar sincronizado ✓', 'success')
       })
     }
     setModalMeet(false)
