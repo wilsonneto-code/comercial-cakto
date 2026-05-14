@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, ChevronLeft, ChevronRight, Video, Trash2, Phone, Calendar, Loader2, CheckCircle, XCircle, Clock, ExternalLink } from 'lucide-react'
+import { Plus, ChevronLeft, ChevronRight, Video, Trash2, Phone, Calendar, Loader2, CheckCircle, XCircle, Clock, MessageCircle } from 'lucide-react'
 import { useAuth, hasAnyRole } from '@/lib/authContext'
 import { Header } from '@/components/Header'
 import { Avatar } from '@/components/ui/Avatar'
@@ -68,6 +68,24 @@ const GERENTE_POR_FUNIL: Record<string, string> = {
   Growth:     'ea6caf80-fea1-4cd5-b7e0-6a124b783e04', // Gabriel Bairros
   Enterprise: '4923ac02-3f50-49b9-8443-f7e1b0e9f6d6', // Rafael Mendes
 }
+function whatsappLink(phone: string | null, clientName: string, gerenteName: string): string | null {
+  if (!phone) return null
+  const digits = phone.replace(/\D/g, '')
+  const num = digits.startsWith('55') ? digits : `55${digits}`
+  const msg = `Oi, ${clientName}! Tudo bem? 😊
+
+Sou o ${gerenteName}, Gerente de Contas aqui da Cakto. A partir de agora sou eu quem vai estar do seu lado para te ajudar a crescer dentro da plataforma.
+
+Vi aqui que sua conta já está configurada e pronta pra rodar — o time de suporte fez um ótimo trabalho!
+
+Meu papel é simples: acompanhar seus resultados de perto, tirar qualquer dúvida que surgir e te ajudar a escalar suas vendas aqui dentro. Sempre que precisar, pode me chamar diretamente por aqui.
+
+Nos próximos dias vou entrar em contato para bater um papo rápido e entender melhor os seus objetivos — assim a gente consegue traçar o melhor caminho juntos.
+
+Seja muito bem-vindo à Cakto! 🚀`
+  return `https://wa.me/${num}?text=${encodeURIComponent(msg)}`
+}
+
 function gerentePorFaturamento(fat: number | null): string | null {
   if (!fat) return null
   const tier = funil(fat)
@@ -473,6 +491,27 @@ function GCContent() {
                                 ))}
                               </div>
                             )}
+
+                            {/* WhatsApp — só na coluna Cliente novo */}
+                            {col.key === 'Cliente novo' && (() => {
+                              const waLink = whatsappLink(a.phone, a.client.split(' ')[0], gerente || 'Gerente')
+                              return waLink ? (
+                                <a href={waLink} target="_blank" rel="noreferrer"
+                                  style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+                                    padding: '8px 12px', borderRadius: 8, marginBottom: 8,
+                                    background: 'color-mix(in srgb, #25D366 15%, var(--bg-card2))',
+                                    border: '1px solid #25D366', color: '#25D366',
+                                    fontWeight: 700, fontSize: 12, textDecoration: 'none',
+                                    justifyContent: 'center' }}>
+                                  <MessageCircle size={14} />
+                                  Enviar mensagem de boas-vindas
+                                </a>
+                              ) : (
+                                <div style={{ fontSize: 11, color: 'var(--orange)', marginBottom: 8, textAlign: 'center' }}>
+                                  Sem telefone cadastrado
+                                </div>
+                              )
+                            })()}
 
                             {/* Ações */}
                             <div style={{ display: 'flex', gap: 6, borderTop: '1px solid var(--border)', paddingTop: 8, marginTop: 4 }}>
