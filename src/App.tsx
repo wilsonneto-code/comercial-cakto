@@ -10,6 +10,7 @@ import Estoque from './pages/Estoque'
 import Agenda from './pages/Agenda'
 import RelatoriosCalls from './pages/RelatoriosCalls'
 import RelatorioDataCrazy from './pages/RelatorioDataCrazy'
+import GerenteContas from './pages/GerenteContas'
 import Dashboards from './pages/Dashboards'
 import Configuracoes from './pages/Configuracoes'
 import DashboardTime from './pages/DashboardTime'
@@ -71,6 +72,7 @@ export default function App() {
       <Route path="/dashboard/lifetime" element={<ProtectedRoute><DashboardLifetime /></ProtectedRoute>} />
       <Route path="/configuracoes" element={<ProtectedRoute><Configuracoes /></ProtectedRoute>} />
       <Route path="/relatorio-pipeline" element={<ProtectedRoute><RelatorioDataCrazy /></ProtectedRoute>} />
+      <Route path="/gerente-contas" element={<ProtectedRoute><GerenteContas /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

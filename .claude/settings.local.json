@@ -82,7 +82,17 @@
       "Bash(curl -s https://api.g1.datacrazy.io/api/v1/leads/4005aa4b-4ed4-4aac-930b-abdc4ea4b3d9 -H 'Authorization: Bearer dc_eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjZhMDMyMjI5ZjhlZjJmMTEzNzRkNDhhMyIsInRlbmFudElkIjoiMGMxZDdkNDktMzRhNC00MTgyLWFlMDctZjA1ZWY2MGIxODNhIiwibmFtZSI6IkNoYXZlIENsYXVkZSBXaWxzb24gU2lzdGVtYSBjb21lcmNpYWwiLCJyb2xlcyI6WyJhZG1pbiJdLCJpc0FkbWluIjp0cnVlLCJpYXQiOjE3Nzg1OTAyNDksImV4cCI6MTgzMjk4Njc5OX0.FabH5ZarpEEF5gaR9Y99TNk0CxF6RDlin-WSNOUKyhs')",
       "Bash(sed -i '' '/import MetabasePage/d' /Users/cakto/Downloads/comercial-cakto-main/src/App.tsx)",
       "Bash(sed -i '' '/path=\"\\\\/metabase\"/d' /Users/cakto/Downloads/comercial-cakto-main/src/App.tsx)",
-      "Bash(sed -i '' \"/key: 'metabase'/d\" /Users/cakto/Downloads/comercial-cakto-main/components/Header.tsx)"
+      "Bash(sed -i '' \"/key: 'metabase'/d\" /Users/cakto/Downloads/comercial-cakto-main/components/Header.tsx)",
+      "Bash(npm run *)",
+      "Bash(node_modules/.bin/vite build *)",
+      "Bash(python3 -c \"import sys,json; p=json.load\\(sys.stdin\\); print\\('name:', p.get\\('name'\\)\\); print\\('build:', p.get\\('scripts',{}\\).get\\('build'\\)\\)\")",
+      "Bash(npm install *)",
+      "Bash(gh run *)",
+      "Bash(gh api *)",
+      "Bash(npx vercel *)",
+      "Bash(vercel --prod)",
+      "WebFetch(domain:www.cakto.com.br)",
+      "Bash(curl -s https://www.cakto.com.br)"
     ]
   }
 }
