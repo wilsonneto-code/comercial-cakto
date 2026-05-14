@@ -74,9 +74,14 @@ serve(async (req) => {
     const closerEmail   = body.closerEmail ?? ''
     // Tenta usar o token pessoal do GC, cai no token compartilhado se não tiver
     const gcTokens      = closerEmail ? await getGCTokens(closerEmail) : { refreshToken: null, calendarId: 'primary' }
-    const calendarId    = gcTokens.calendarId || Deno.env.get('GOOGLE_CALENDAR_ID') || 'primary'
-    console.log('[schedule-call] closerEmail:', closerEmail, '| refreshToken exists:', !!gcTokens.refreshToken, '| calendarId:', calendarId)
-    const accessToken   = await getAccessToken(gcTokens.refreshToken || undefined)
+    // Se não há token pessoal, retorna aviso sem usar o token compartilhado (pode estar desatualizado)
+    if (!gcTokens.refreshToken) {
+      console.warn('[schedule-call] Sem token pessoal para:', closerEmail, '— Google Calendar ignorado')
+      return json({ eventId: null, meetLink: null, skipped: true })
+    }
+    const calendarId    = gcTokens.calendarId || 'primary'
+    console.log('[schedule-call] closerEmail:', closerEmail, '| calendarId:', calendarId)
+    const accessToken   = await getAccessToken(gcTokens.refreshToken)
     const calBase     = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`
     const authHdr     = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }
     const json        = (s: unknown) => new Response(JSON.stringify(s), { headers: { ...CORS, 'Content-Type': 'application/json' } })

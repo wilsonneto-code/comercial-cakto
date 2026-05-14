@@ -95,7 +95,8 @@
       "Bash(curl -s https://www.cakto.com.br)",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(r['id'], r['name'], r['role']\\) for r in d['rows']]\")",
       "Bash(curl -s 'https://dugjrmjlcmkeyjjbqxxk.supabase.co/functions/v1/google-oauth?action=url' -X POST -H 'Content-Type: application/json' -d '{\"user_id\":\"test\"}')",
-      "Bash(supabase secrets *)"
+      "Bash(supabase secrets *)",
+      "Bash(curl -s -X POST https://dugjrmjlcmkeyjjbqxxk.supabase.co/functions/v1/schedule-call -H 'Authorization: Bearer __CMDSUB_OUTPUT__')"
     ]
   }
 }

@@ -303,6 +303,8 @@ function GCContent() {
       const { eventId, meetLink, error: fnBodyErr, _debug } = (fnData || {}) as any
       if (fnBodyErr) { toast(`Erro GCal: ${fnBodyErr}`, 'error'); return }
       if (_debug) console.log('[GCal debug]', _debug)
+      const { skipped } = (fnData || {}) as any
+      if (skipped) { toast('Gerente sem Google Calendar conectado', 'error'); return }
       if (eventId) {
         await supabase.from('followup_meetings').update({ google_event_id: eventId, meet_link: meetLink ?? '' }).eq('id', newM.id)
         setMeetings(p => p.map(m => m.id === newM.id ? { ...m, google_event_id: eventId, meet_link: meetLink ?? '' } : m))
@@ -394,8 +396,9 @@ function GCContent() {
           console.error('[GCal error]', fnErr)
           toast(`Erro GCal: ${msg}`, 'error'); return
         }
-        const { eventId, meetLink, error: fnBodyErr } = (fnData || {}) as any
+        const { eventId, meetLink, error: fnBodyErr, skipped } = (fnData || {}) as any
         if (fnBodyErr) { toast(`Erro GCal: ${fnBodyErr}`, 'error'); return }
+        if (skipped) { toast('Gerente sem Google Calendar conectado', 'error'); return }
         if (eventId) {
           await supabase.from('followup_meetings').update({ google_event_id: eventId, meet_link: meetLink ?? '' }).eq('id', newM.id)
           setMeetings(p => p.map(m => m.id === newM.id ? { ...m, google_event_id: eventId, meet_link: meetLink ?? '' } : m))
