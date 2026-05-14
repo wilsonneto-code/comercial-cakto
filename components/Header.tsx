@@ -42,8 +42,8 @@ export function Header() {
   const isActive = (key: string) => pathname === `/${key}`;
 
   const navLinkStyle = (key: string): React.CSSProperties => ({
-    display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 7,
-    fontSize: 13, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+    display: 'flex', alignItems: 'center', gap: 5, padding: '6px 8px', borderRadius: 7,
+    fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
     color: isActive(key) ? 'var(--text)' : 'var(--text2)',
     background: isActive(key) ? 'var(--bg-card2)' : 'transparent',
     transition: 'all .15s', border: 'none', fontFamily: 'inherit',
@@ -72,7 +72,7 @@ export function Header() {
       </button>
 
       {/* Nav */}
-      <nav style={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, overflow: 'hidden', marginLeft: 8 }}>
+      <nav style={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, overflowX: 'auto', marginLeft: 8, scrollbarWidth: 'none' }}>
         {nav.map(n => (
           <button key={n.key} style={navLinkStyle(n.key)} onClick={() => navigate(`/${n.key}`)}
             onMouseEnter={e => { if (!isActive(n.key)) (e.currentTarget as HTMLButtonElement).style.color = 'var(--text)'; }}
