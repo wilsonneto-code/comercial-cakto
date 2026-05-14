@@ -33,7 +33,9 @@ export function Header() {
     ...(hasAnyRole(user, ['Admin']) ? [
       { key: 'pagamentos',    label: 'Pagamentos'    },
       { key: 'configuracoes', label: 'Configurações' },
-    ] : []),
+    ] : [
+      { key: 'pagamentos',    label: 'Pagamentos'    },
+    ]),
   ];
 
   const isActive = (key: string) => pathname === `/${key}`;
