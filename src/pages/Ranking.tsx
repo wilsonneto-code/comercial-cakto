@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Crown, ArrowUp, ArrowDown, Loader2, Users } from 'lucide-react'
+import { Crown, ArrowUp, ArrowDown, Loader2 } from 'lucide-react'
 import { useToast } from '@/components/ui/Toast'
 import { Header } from '@/components/Header'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 import { Sheet } from '@/components/ui/Sheet'
-import { Modal } from '@/components/ui/Modal'
 import { Sel } from '@/components/ui/Field'
 import { BarChartV } from '@/components/ui/charts/BarChartV'
 import { DateFilter, DateRange } from '@/components/ui/DateFilter'
@@ -38,7 +37,7 @@ export default function Ranking() {
   const [isLoading,   setIsLoading]   = useState(true)
   const [filterTeam,  setFilterTeam]  = useState('')
   const [sheetUser,   setSheetUser]   = useState<RankEntry | null>(null)
-  const [sdrModal,    setSdrModal]    = useState(false)
+  const [viewMode,    setViewMode]    = useState<'closers' | 'sdr'>('closers')
   const [dateRange,   setDateRange]   = useState<DateRange>(DEFAULT_RANGE)
 
   useEffect(() => {
@@ -208,15 +207,9 @@ export default function Ranking() {
             <DateFilter value="Mês Atual" onChange={setDateRange} />
             <Sel value={filterTeam} onChange={setFilterTeam}
               options={teams.map(t => t.name)} placeholder="Todos os times" />
-            <button onClick={() => setSdrModal(true)} style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '7px 16px', borderRadius: 8, border: '1px solid #0891b2',
-              background: 'color-mix(in srgb, #0891b2 12%, var(--bg-card))',
-              color: '#0891b2', fontWeight: 700, fontSize: 13,
-              cursor: 'pointer', fontFamily: 'inherit',
-            }}>
-              <Users size={14} /> Ranking SDR
-            </button>
+            <Sel value={viewMode} onChange={v => setViewMode(v as 'closers' | 'sdr')}
+              options={[{ value: 'closers', label: 'Closers' }, { value: 'sdr', label: 'SDR' }]}
+              placeholder="Closers" />
           </div>
         </div>
 
@@ -228,82 +221,36 @@ export default function Ranking() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
 
-            {/* ══ SEÇÃO CLOSERS ══════════════════════════════════════════════ */}
-            <section>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-                <div style={{ width: 4, height: 24, borderRadius: 2, background: 'var(--action)' }} />
-                <h2 style={{ fontSize: 18, fontWeight: 800 }}>Ranking Closers</h2>
-              </div>
-
-              {/* Pódio */}
-              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 32, marginBottom: 16 }}>
-                <Podium top3={closerTop3} color="var(--action)" />
-              </div>
-
-              {/* Gráfico */}
-              {closerChart.length > 0 && (
-                <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 20, marginBottom: 16 }}>
-                  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 16 }}>Ativações por Closer</div>
-                  <BarChartV data={closerChart} height={180} />
+            {viewMode === 'closers' ? (
+              <section>
+                <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 32, marginBottom: 16 }}>
+                  <Podium top3={closerTop3} color="var(--action)" />
                 </div>
-              )}
-
-              {/* Tabela */}
-              <RankingTable ranking={closerRanking} title="Ranking Closers" />
-            </section>
+                {closerChart.length > 0 && (
+                  <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 20, marginBottom: 16 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 16 }}>Ativações por Closer</div>
+                    <BarChartV data={closerChart} height={180} />
+                  </div>
+                )}
+                <RankingTable ranking={closerRanking} title="Ranking Closers" />
+              </section>
+            ) : (
+              <section>
+                <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 32, marginBottom: 16 }}>
+                  <Podium top3={sdrTop3} color="#0891b2" />
+                </div>
+                {sdrChart.length > 0 && (
+                  <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 20, marginBottom: 16 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 16 }}>Ativações por SDR</div>
+                    <BarChartV data={sdrChart} height={180} />
+                  </div>
+                )}
+                <RankingTable ranking={sdrRanking} title="Ranking SDR" />
+              </section>
+            )}
 
           </div>
         )}
-
-        {/* ── Modal: Ranking SDR ── */}
-        <Modal open={sdrModal} onClose={() => setSdrModal(false)} title="Ranking SDR">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <Podium top3={sdrTop3} color="#0891b2" />
-            {sdrChart.length > 0 && (
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>Ativações por SDR</div>
-                <BarChartV data={sdrChart} height={160} />
-              </div>
-            )}
-            <div style={{ overflowX: 'auto' }}>
-              <table className="tbl">
-                <thead>
-                  <tr><th>#</th><th>Nome</th><th>Time</th><th>Ativações</th><th>Score</th></tr>
-                </thead>
-                <tbody>
-                  {sdrRanking.length === 0 && (
-                    <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text2)', padding: 24 }}>
-                      Nenhum dado disponível.
-                    </td></tr>
-                  )}
-                  {sdrRanking.map((r, i) => (
-                    <tr key={r.userId}>
-                      <td style={{ fontWeight: 800, color: i < 3 ? MEDAL_COLORS[i] : 'var(--text2)' }}>{i + 1}</td>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <Avatar name={r.name} size={28} />
-                          <span style={{ fontWeight: 600 }}>{r.name}</span>
-                        </div>
-                      </td>
-                      <td style={{ fontSize: 13, color: 'var(--text2)' }}>{r.team}</td>
-                      <td style={{ fontWeight: 700 }}>{r.activations}</td>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <div style={{ flex: 1, maxWidth: 60 }}>
-                            <div className="progress-bar">
-                              <div className="progress-fill" style={{ width: `${r.score}%`, background: '#0891b2' }} />
-                            </div>
-                          </div>
-                          <span style={{ fontSize: 12, fontWeight: 600 }}>{r.score}</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </Modal>
 
         {/* ── Sheet: Perfil ── */}
         <Sheet open={!!sheetUser} onClose={() => setSheetUser(null)} title="Perfil de Performance">
