@@ -294,7 +294,12 @@ function GCContent() {
         clientEmail: quickMeetClient.email, notes: '',
       },
     }).then(async ({ data: fnData, error: fnErr }) => {
-      if (fnErr) { toast(`Erro GCal: ${(fnErr as any)?.message ?? JSON.stringify(fnErr)}`, 'error'); return }
+      if (fnErr) {
+        let msg = (fnErr as any)?.message ?? ''
+        try { const ctx = (fnErr as any)?.context; if (ctx?.json) { const b = await ctx.json(); msg = b?.error ?? msg } } catch {}
+        console.error('[GCal error]', fnErr)
+        toast(`Erro GCal: ${msg}`, 'error'); return
+      }
       const { eventId, meetLink, error: fnBodyErr, _debug } = (fnData || {}) as any
       if (fnBodyErr) { toast(`Erro GCal: ${fnBodyErr}`, 'error'); return }
       if (_debug) console.log('[GCal debug]', _debug)
@@ -383,7 +388,12 @@ function GCContent() {
           clientEmail: meetForm.clientEmail || '', notes: meetForm.notes,
         },
       }).then(async ({ data: fnData, error: fnErr }) => {
-        if (fnErr) { toast(`Erro GCal: ${(fnErr as any)?.message ?? JSON.stringify(fnErr)}`, 'error'); return }
+        if (fnErr) {
+          let msg = (fnErr as any)?.message ?? ''
+          try { const ctx = (fnErr as any)?.context; if (ctx?.json) { const b = await ctx.json(); msg = b?.error ?? msg } } catch {}
+          console.error('[GCal error]', fnErr)
+          toast(`Erro GCal: ${msg}`, 'error'); return
+        }
         const { eventId, meetLink, error: fnBodyErr } = (fnData || {}) as any
         if (fnBodyErr) { toast(`Erro GCal: ${fnBodyErr}`, 'error'); return }
         if (eventId) {
