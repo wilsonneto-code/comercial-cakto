@@ -209,7 +209,7 @@ export default function Ranking() {
               options={teams.map(t => t.name)} placeholder="Todos os times" />
             <Sel value={viewMode} onChange={v => setViewMode(v as 'closers' | 'sdr')}
               options={[{ value: 'closers', label: 'Closers' }, { value: 'sdr', label: 'SDR' }]}
-              placeholder="Closers" />
+              placeholder="" />
           </div>
         </div>
 
