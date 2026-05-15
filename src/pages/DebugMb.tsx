@@ -17,6 +17,7 @@ export default function DebugMb() {
   const [tablesRes,  setTablesRes]  = useState<any>(null)
   const [findRes,    setFindRes]    = useState<any>(null)
   const [deepRes,    setDeepRes]    = useState<any[]>([])
+  const [caktoPayRes,setCaktoPayRes]= useState<any>(null)
   const [isLoading,  setIsLoading]  = useState(false)
   const [loadingDbs, setLoadingDbs] = useState(false)
 
@@ -33,7 +34,7 @@ export default function DebugMb() {
   async function runAll() {
     if (!email.trim() || databases.length === 0) return
     setIsLoading(true)
-    setResults({}); setStatusRes(null); setTablesRes(null); setFindRes(null); setDeepRes([])
+    setResults({}); setStatusRes(null); setTablesRes(null); setFindRes(null); setDeepRes([]); setCaktoPayRes(null)
 
     // Exploração profunda em paralelo com a busca por banco
     const [entries, deepData] = await Promise.all([
@@ -54,12 +55,22 @@ export default function DebugMb() {
     if (deepData.data?.report) setDeepRes(deepData.data.report)
 
     const splitResult = res[3]
-    const userId = splitResult?.rows?.[0]?.[0]
-    if (userId) {
+    const userId3 = splitResult?.rows?.[0]?.[0]
+    if (userId3) {
       const statusData = await supabase.functions.invoke('mb-search', {
-        body: { all_statuses: true, user_id: userId, db_id: 3 },
+        body: { all_statuses: true, user_id: userId3, db_id: 3 },
       })
-      setStatusRes({ userId, data: statusData.data })
+      setStatusRes({ userId: userId3, data: statusData.data })
+    }
+
+    // Busca user_id no banco Cakto #4 e testa tabelas de pagamento
+    const caktoResult = res[4]
+    const userId4 = caktoResult?.rows?.[0]?.[0]
+    if (userId4) {
+      const payData = await supabase.functions.invoke('mb-search', {
+        body: { explore_payments_cakto: true, user_id: userId4, db_id: 4 },
+      })
+      setCaktoPayRes({ userId: userId4, data: payData.data })
     }
     setIsLoading(false)
   }
@@ -171,6 +182,26 @@ export default function DebugMb() {
             {tablesRes?.error
               ? <div style={{ padding: 16, color: '#FF3B30', fontSize: 13 }}>{tablesRes.error}</div>
               : <Table cols={tablesRes?.cols ?? []} rows={tablesRes?.rows ?? []} />
+            }
+          </div>
+        )}
+
+        {/* Pagamentos no banco Cakto #4 */}
+        {caktoPayRes && (
+          <div style={card}>
+            <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 14 }}>
+              Pagamentos no Cakto #4 — user_id {caktoPayRes.userId}
+            </div>
+            {(caktoPayRes.data?.results ?? []).length === 0
+              ? <div style={{ padding: 16, color: '#FF9F0A', fontSize: 13 }}>Nenhum dado encontrado nas tabelas gateway_order / gateway_payment_orders</div>
+              : (caktoPayRes.data.results as any[]).map((r: any, i: number) => (
+                  <div key={i}>
+                    <div style={{ padding: '8px 20px', fontSize: 11, color: '#34C759', fontWeight: 700, background: 'var(--bg-card2)' }}>
+                      {r.table} · campo: {r.userField}
+                    </div>
+                    <Table cols={r.cols} rows={r.rows} />
+                  </div>
+                ))
             }
           </div>
         )}

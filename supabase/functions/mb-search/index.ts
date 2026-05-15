@@ -146,6 +146,55 @@ serve(async (req) => {
     return json({ cols: data?.data?.cols?.map((c: any) => c.name) ?? [], rows: data?.data?.rows ?? [], error: data?.error ?? null })
   }
 
+  // ── Modo: buscar pagamentos por user_id em tabelas do banco Cakto #4 ─────
+  if (body.explore_payments_cakto) {
+    const userId = Number(body.user_id)
+    const dbId   = Number(body.db_id ?? 4)
+    // Tenta as tabelas payment-related do Cakto #4
+    const tables = [
+      'gateway_order', 'gateway_payment_orders', 'gateway_subscription',
+    ]
+    const results: any[] = []
+    for (const table of tables) {
+      // Primeiro pega as colunas da tabela
+      const colRes = await fetch(`${MB_URL}/api/dataset`, {
+        method: 'POST',
+        headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ database: dbId, type: 'native', native: { query: `SELECT * FROM "public"."${table}" LIMIT 1` } }),
+      })
+      const colData = await colRes.json()
+      const cols = colData?.data?.cols?.map((c: any) => c.name) ?? []
+
+      // Tenta por user_id com vários nomes de campo
+      for (const userField of ['user_id', 'buyer_id', 'customer_id', 'payer_id']) {
+        if (!cols.includes(userField)) continue
+        const sql = `
+          SELECT status, COUNT(*) as count,
+            SUM(amount) as total_amount,
+            SUM(value) as total_value
+          FROM "public"."${table}"
+          WHERE "${userField}" = ${userId}
+          GROUP BY status
+          ORDER BY count DESC
+        `
+        const r = await fetch(`${MB_URL}/api/dataset`, {
+          method: 'POST',
+          headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ database: dbId, type: 'native', native: { query: sql } }),
+        })
+        const d = await r.json()
+        if (!d?.error && (d?.data?.rows?.length ?? 0) > 0) {
+          results.push({ table, userField, cols: d.data.cols.map((c: any) => c.name), rows: d.data.rows })
+        }
+      }
+      // Também tenta sample sem filtro para ver estrutura
+      if (results.length === 0 && cols.length > 0) {
+        results.push({ table, userField: '(sample)', cols, rows: colData?.data?.rows ?? [] })
+      }
+    }
+    return json({ results })
+  }
+
   // ── Modo: exploração profunda — listar tabelas e buscar pagamentos ────────
   if (body.deep_explore && body.debug_email) {
     const email  = body.debug_email.toLowerCase().replace(/'/g, "''")
