@@ -89,7 +89,6 @@ function DashboardsContent() {
     { key: 'builder' as DashView, title: 'Dashboard Builder', desc: 'Crie e configure painéis personalizados com gráficos e métricas.',    icon: LayoutDashboard, color: '#3B82F6',       disabled: false, adminOnly: false },
     { key: 'sdr'     as DashView, title: 'Dashboard SDR',     desc: 'Calls agendadas vs realizadas, funil de conversão, ranking e motivos de não ativação.', icon: User,          color: 'var(--action)', disabled: false, adminOnly: false },
     { key: 'gerente' as DashView, title: 'Dashboard Gerente', desc: 'Carteira de clientes, % atingido, motivos, alertas e cobertura de notas.',                  icon: TrendingUp,    color: 'var(--purple)', disabled: false, adminOnly: false },
-    { key: 'grid'    as DashView, title: 'Relatórios',        desc: 'Em breve — relatórios exportáveis, comparativos e histórico.',                              icon: BarChart2,     color: 'var(--cyan)',   disabled: true,  adminOnly: false },
   ];
 
   const timeCards = [
