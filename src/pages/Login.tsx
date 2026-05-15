@@ -53,6 +53,7 @@ export default function Login() {
     setErrorMsg('')
     setSuccessMsg('')
     if (!name || !email || !password || !confirmPw) { setErrorMsg('Preencha todos os campos.'); return }
+    if (!email.toLowerCase().endsWith('@cakto.com.br')) { setErrorMsg('Apenas e-mails @cakto.com.br podem criar conta.'); return }
     if (password !== confirmPw) { setErrorMsg('Senhas não coincidem.'); return }
     if (password.length < 6) { setErrorMsg('Senha: mínimo 6 caracteres.'); return }
     setIsSubmitting(true)
