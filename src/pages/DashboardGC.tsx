@@ -167,6 +167,7 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
   const tpvAcumulado = dailyTpv[dailyTpv.length - 1]?.acumulado ?? 0
   const melhorDia    = dailyTpv.reduce((best, d) => d.value > best.value ? d : best, { label: '—', value: 0, acumulado: 0 })
   const diasComVenda = dailyTpv.filter(d => d.value > 0).length
+  const [hoveredBar, setHoveredBar] = useState<{ idx: number; x: number; y: number } | null>(null)
 
   const card: React.CSSProperties = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14 }
 
@@ -264,28 +265,54 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
           ) : (
             <>
               {/* Barras de valor diário */}
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 100, marginBottom: 4, padding: '0 4px' }}>
-                {dailyTpv.map((d, i) => {
-                  const maxVal = Math.max(...dailyTpv.map(x => x.value), 1)
-                  const h = d.value > 0 ? Math.max(4, (d.value / maxVal) * 90) : 0
-                  const isHoje = d.label === new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+              <div style={{ position: 'relative' }}>
+                {/* Tooltip */}
+                {hoveredBar !== null && dailyTpv[hoveredBar.idx] && (() => {
+                  const d = dailyTpv[hoveredBar.idx]
                   return (
-                    <div key={i} title={`${d.label}: ${BRL(d.value)}`}
-                      style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', cursor: 'default' }}>
-                      <div style={{
-                        width: '80%', height: h,
-                        background: isHoje
-                          ? COR.verde
-                          : d.value > 0
-                            ? `color-mix(in srgb, ${COR.verde} 70%, ${COR.azul})`
-                            : 'var(--border)',
-                        borderRadius: '3px 3px 0 0',
-                        opacity: d.value === 0 ? 0.25 : 1,
-                        transition: 'height .3s',
-                      }} />
+                    <div style={{
+                      position: 'absolute', top: hoveredBar.y - 72, left: Math.min(hoveredBar.x - 60, window.innerWidth - 160),
+                      background: '#1e293b', border: '1px solid var(--border)', borderRadius: 10,
+                      padding: '10px 14px', zIndex: 100, pointerEvents: 'none', minWidth: 140,
+                      boxShadow: '0 8px 24px rgba(0,0,0,.5)',
+                    }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', marginBottom: 6 }}>{d.label}</div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: d.value > 0 ? COR.verde : 'var(--text2)' }}>{BRL(d.value)}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>
+                        Acumulado: <span style={{ fontWeight: 700, color: COR.azul }}>{BRL(d.acumulado)}</span>
+                      </div>
                     </div>
                   )
-                })}
+                })()}
+
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 100, marginBottom: 4, padding: '0 4px' }}
+                  onMouseLeave={() => setHoveredBar(null)}>
+                  {dailyTpv.map((d, i) => {
+                    const maxVal = Math.max(...dailyTpv.map(x => x.value), 1)
+                    const h = d.value > 0 ? Math.max(4, (d.value / maxVal) * 90) : 2
+                    const isHoje = d.label === new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+                    const isHovered = hoveredBar?.idx === i
+                    return (
+                      <div key={i}
+                        onMouseEnter={e => setHoveredBar({ idx: i, x: e.currentTarget.getBoundingClientRect().left - e.currentTarget.closest('.page-wrap')!.getBoundingClientRect().left + 20, y: e.currentTarget.getBoundingClientRect().top - e.currentTarget.closest('.page-wrap')!.getBoundingClientRect().top })}
+                        style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', cursor: 'crosshair', height: 100 }}>
+                        <div style={{
+                          width: isHovered ? '90%' : '75%', height: h,
+                          background: isHovered
+                            ? '#fff'
+                            : isHoje
+                              ? COR.verde
+                              : d.value > 0
+                                ? `color-mix(in srgb, ${COR.verde} 70%, ${COR.azul})`
+                                : 'var(--border)',
+                          borderRadius: '3px 3px 0 0',
+                          opacity: d.value === 0 ? 0.2 : 1,
+                          transition: 'width .1s, background .1s',
+                        }} />
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
 
               {/* Linha acumulado */}
