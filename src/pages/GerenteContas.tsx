@@ -281,6 +281,15 @@ function GCContent() {
     return visibleMeetings.filter(m => m.date === dStr)
   }
 
+  // ── Transferir cliente para outro GC ────────────────────────────────────
+  async function transferClient(id: string, gerenteId: string) {
+    const novoGerente = gerentes.find(g => g.id === gerenteId)
+    const { error } = await supabase.from('activations').update({ gerente_id: gerenteId || null }).eq('id', id)
+    if (error) { toast(error.message, 'error'); return }
+    setActs(p => p.map(a => a.id === id ? { ...a, gerente_id: gerenteId || null } : a))
+    toast(`Transferido para ${novoGerente?.name ?? 'sem gerente'} ✓`, 'success')
+  }
+
   // ── Move card no Kanban ──────────────────────────────────────────────────
   async function moveKanban(id: string, status: string) {
     const { error } = await supabase.from('activations').update({ gc_status: status }).eq('id', id)
@@ -792,8 +801,7 @@ function GCContent() {
                             })()}
 
                             {/* Ações */}
-                            <div style={{ display: 'flex', gap: 6, borderTop: '1px solid var(--border)', paddingTop: 8, marginTop: 4 }}>
-                              {/* Mover para coluna anterior */}
+                            <div style={{ display: 'flex', gap: 6, borderTop: '1px solid var(--border)', paddingTop: 8, marginTop: 4, flexWrap: 'wrap' }}>
                               {colIdx > 0 && (
                                 <button onClick={() => moveKanban(a.id, KANBAN_COLS[colIdx - 1].key)}
                                   style={{ fontSize: 10, padding: '3px 7px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card2)', cursor: 'pointer', color: 'var(--text2)', fontFamily: 'inherit' }}>
@@ -804,7 +812,6 @@ function GCContent() {
                                 style={{ fontSize: 10, padding: '3px 8px', borderRadius: 6, border: `1px solid ${col.color}`, background: `color-mix(in srgb, ${col.color} 10%, var(--bg-card))`, cursor: 'pointer', color: col.color, fontFamily: 'inherit', fontWeight: 700 }}>
                                 + Reunião
                               </button>
-                              {/* Mover para próxima coluna — bloqueado em "Cliente novo" até welcome_sent */}
                               {colIdx < KANBAN_COLS.length - 1 && (() => {
                                 const blocked = col.key === 'Cliente novo' && !a.welcome_sent
                                 return (
@@ -812,8 +819,7 @@ function GCContent() {
                                     onClick={() => !blocked && moveKanban(a.id, KANBAN_COLS[colIdx + 1].key)}
                                     title={blocked ? 'Confirme o envio da mensagem de boas-vindas primeiro' : ''}
                                     style={{ fontSize: 10, padding: '3px 7px', borderRadius: 6,
-                                      border: `1px solid ${blocked ? 'var(--border)' : 'var(--border)'}`,
-                                      background: blocked ? 'var(--bg-card2)' : 'var(--bg-card2)',
+                                      border: '1px solid var(--border)', background: 'var(--bg-card2)',
                                       cursor: blocked ? 'not-allowed' : 'pointer',
                                       color: blocked ? 'var(--border)' : 'var(--text2)',
                                       fontFamily: 'inherit', opacity: blocked ? 0.4 : 1 }}>
@@ -821,13 +827,29 @@ function GCContent() {
                                   </button>
                                 )
                               })()}
-                              {/* Mover para qualquer coluna via select */}
-                              <select value={col.key}
-                                onChange={e => moveKanban(a.id, e.target.value)}
-                                style={{ marginLeft: 'auto', fontSize: 10, padding: '3px 4px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card2)', color: 'var(--text2)', cursor: 'pointer', fontFamily: 'inherit', maxWidth: 80 }}>
+                              {/* Mover coluna */}
+                              <select value={col.key} onChange={e => moveKanban(a.id, e.target.value)}
+                                style={{ fontSize: 10, padding: '3px 4px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card2)', color: 'var(--text2)', cursor: 'pointer', fontFamily: 'inherit', maxWidth: 80 }}>
                                 {KANBAN_COLS.map(c => <option key={c.key} value={c.key}>{c.key}</option>)}
                               </select>
                             </div>
+
+                            {/* Transferir GC — visível para Admin ou se o GC quiser transferir para si */}
+                            {gerentes.length > 1 && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, paddingTop: 6, borderTop: '1px dashed var(--border)' }}>
+                                <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em', flexShrink: 0 }}>GC:</span>
+                                <select
+                                  value={a.gerente_id || ''}
+                                  onChange={e => transferClient(a.id, e.target.value)}
+                                  style={{ flex: 1, fontSize: 10, padding: '3px 5px', borderRadius: 6,
+                                    border: '1px solid var(--border)', background: 'var(--bg-card2)',
+                                    color: a.gerente_id ? 'var(--action)' : 'var(--text2)',
+                                    cursor: 'pointer', fontFamily: 'inherit' }}>
+                                  <option value=''>Sem gerente</option>
+                                  {gerentes.map(g => <option key={g.id} value={g.id}>{g.name.split(' ')[0]}</option>)}
+                                </select>
+                              </div>
+                            )}
                           </div>
                         )
                       })}
