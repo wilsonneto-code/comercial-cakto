@@ -214,8 +214,17 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
 
   // ── Actions ───────────────────────────────────────────────────────────────
   const save = async () => {
-    if (!form.client || !form.email || !form.responsible || !form.date) {
-      toast('Preencha os campos obrigatórios.', 'error'); return
+    const missing: string[] = []
+    if (!form.client)            missing.push('Nome do Cliente')
+    if (!form.email)             missing.push('Email')
+    if (!form.responsible)       missing.push('Responsável')
+    if (!form.date)              missing.push('Data de Ativação')
+    if (!form.phone || form.phone === '+55 ') missing.push('Telefone')
+    if (!form.faturamento_mensal) missing.push('Faturamento Mensal')
+    if (!form.notes)             missing.push('Notas')
+    if (sdrOptions.length > 0 && !form.sdr_id) missing.push('SDR Responsável')
+    if (missing.length > 0) {
+      toast(`Campos obrigatórios: ${missing.join(', ')}`, 'error'); return
     }
     setIsSaving(true)
 
@@ -432,15 +441,15 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
         <Field label="Data de Ativação" required>
           <input className="inp" type="date" value={form.date} onChange={setF('date')} />
         </Field>
-        <Field label="Telefone">
+        <Field label="Telefone" required>
           <input className="inp" value={form.phone} onChange={setF('phone')} placeholder="+55 11 99999-0000" />
         </Field>
       </div>
-      <Field label="Canal">
+      <Field label="Canal" required>
         <Sel value={form.channel} onChange={v => setForm(p => ({ ...p, channel: v }))}
           options={CHANNELS} placeholder="" />
       </Field>
-      <Field label="Faturamento Mensal Esperado (R$)">
+      <Field label="Faturamento Mensal Esperado (R$)" required>
         <input className="inp" type="number" value={form.faturamento_mensal}
           onChange={e => setForm(p => ({ ...p, faturamento_mensal: e.target.value }))}
           placeholder="Ex: 75000" />
@@ -455,7 +464,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
           )
         })()}
       </Field>
-      <Field label="Notas">
+      <Field label="Notas" required>
         <textarea className="inp" rows={3} value={form.notes}
           onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
           placeholder="Observações sobre o cliente, contrato, produto…"
@@ -530,7 +539,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
       )}
 
       {/* SDR Responsável */}
-      <Field label="SDR Responsável">
+      <Field label="SDR Responsável" required={sdrOptions.length > 0}>
         {!form.responsible ? (
           <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text2)', background: 'var(--bg-card2)',
             border: '1px solid var(--border)', borderRadius: 8 }}>
@@ -555,12 +564,12 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
         <Field label="Data de Ativação" required>
           <input className="inp" type="date" value={form.date} onChange={setF('date')} />
         </Field>
-        <Field label="Telefone">
+        <Field label="Telefone" required>
           <input className="inp" value={form.phone} onChange={setF('phone')} placeholder="+55 11 99999-0000" />
         </Field>
       </div>
 
-      <Field label="Faturamento Mensal Esperado (R$)">
+      <Field label="Faturamento Mensal Esperado (R$)" required>
         <input className="inp" type="number" value={form.faturamento_mensal}
           onChange={e => setForm(p => ({ ...p, faturamento_mensal: e.target.value }))}
           placeholder="Ex: 75000" />
@@ -575,7 +584,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
           )
         })()}
       </Field>
-      <Field label="Notas">
+      <Field label="Notas" required>
         <textarea className="inp" rows={3} value={form.notes}
           onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
           placeholder="Observações sobre o cliente, contrato, produto…"
