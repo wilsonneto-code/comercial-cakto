@@ -515,44 +515,51 @@ serve(async (req) => {
     offset += PAGE
   }
 
-  // Complementa com TPV do banco Cakto #4 (produtor principal + afiliado/coprodutor)
-  const zeroEmails = allRows.filter(r => !Number(r[5])).map(r => r[2]).filter(Boolean)
-  if (zeroEmails.length > 0) {
-    const emailList = zeroEmails.map((e: string) => `'${e.replace(/'/g, "''")}'`).join(',')
-
-    // Cakto #4: gateway_split.totalAmount (cobre produtor, afiliado e coprodutor)
-    const sqlCakto4Portfolio = `
-      SELECT
-        u."email",
-        COALESCE(SUM(gs."totalAmount") FILTER (
-          WHERE go."status" = 'paid'
-            AND DATE_TRUNC('month', gs."createdAt") = DATE_TRUNC('month', CURRENT_DATE)
-        ), 0) AS tpv_mes
-      FROM "public"."user_user" u
-      JOIN "public"."gateway_split" gs ON gs."user_id" = u."id"
-      JOIN "public"."gateway_order" go ON go."id" = gs."order_id"
-      WHERE LOWER(u."email") IN (${emailList.toLowerCase()})
-      GROUP BY u."email"
-    `
-
-    const cakto4Res = await fetch(`${MB_URL}/api/dataset`, {
-      method: 'POST',
-      headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ database: 4, type: 'native', native: { query: sqlCakto4Portfolio } }),
-    }).then(r => r.json())
-
+  // Consulta Cakto #4 para TODOS os clientes via gateway_split.totalAmount
+  const allEmails = allRows.map(r => r[2]).filter(Boolean)
+  if (allEmails.length > 0) {
+    // Processa em lotes para não exceder limite da query
+    const BATCH = 500
     const caktoMap: Record<string, number> = {}
-    ;(cakto4Res?.data?.rows ?? []).forEach((r: any[]) => {
-      if (r[0]) caktoMap[r[0].toLowerCase()] = Number(r[1] ?? 0)
-    })
 
+    for (let i = 0; i < allEmails.length; i += BATCH) {
+      const batch = allEmails.slice(i, i + BATCH)
+      const emailList = batch.map((e: string) => `'${e.replace(/'/g, "''")}'`).join(',')
+
+      const sqlCakto4 = `
+        SELECT
+          u."email",
+          COALESCE(SUM(gs."totalAmount") FILTER (
+            WHERE go."status" = 'paid'
+              AND DATE_TRUNC('month', gs."createdAt") = DATE_TRUNC('month', CURRENT_DATE)
+          ), 0) AS tpv_mes
+        FROM "public"."user_user" u
+        JOIN "public"."gateway_split" gs ON gs."user_id" = u."id"
+        JOIN "public"."gateway_order" go ON go."id" = gs."order_id"
+        WHERE LOWER(u."email") IN (${emailList.toLowerCase()})
+        GROUP BY u."email"
+      `
+
+      const res = await fetch(`${MB_URL}/api/dataset`, {
+        method: 'POST',
+        headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ database: 4, type: 'native', native: { query: sqlCakto4 } }),
+      }).then(r => r.json())
+
+      ;(res?.data?.rows ?? []).forEach((r: any[]) => {
+        if (r[0]) caktoMap[r[0].toLowerCase()] = Number(r[1] ?? 0)
+      })
+    }
+
+    // Usa o maior valor entre Cakto Split (#3) e Cakto (#4)
     allRows = allRows.map(r => {
-      const email = (r[2] ?? '').toLowerCase()
+      const email    = (r[2] ?? '').toLowerCase()
+      const splitTpv = Number(r[5] ?? 0)
       const caktoTpv = caktoMap[email] ?? 0
-      if (caktoTpv > Number(r[5] ?? 0)) {
-        return [r[0], r[1], r[2], r[3], r[4], caktoTpv, r[6], r[7]]
-      }
-      return r
+      const bestTpv  = Math.max(splitTpv, caktoTpv)
+      return bestTpv !== splitTpv
+        ? [r[0], r[1], r[2], r[3], r[4], bestTpv, r[6], r[7]]
+        : r
     })
   }
 
