@@ -123,6 +123,7 @@ function GCContent() {
   const [users, setUsers]         = useState<DbUser[]>([])
   const [activations, setActs]    = useState<DbActivation[]>([])
   const [meetings, setMeetings]   = useState<Meeting[]>([])
+  const [tpvMap, setTpvMap]       = useState<Record<string, { tpv_mes: number; ultima_venda: string | null }>>({})
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving]   = useState(false)
 
@@ -193,7 +194,17 @@ function GCContent() {
       ])
       const userList = (usrs || []) as DbUser[]
       setUsers(userList)
-      setActs((acts || []) as DbActivation[])
+      const actsList = (acts || []) as DbActivation[]
+      setActs(actsList)
+
+      // Busca TPV do mês para cada cliente via Metabase
+      const emails = actsList.map(a => a.email).filter(Boolean)
+      if (emails.length > 0) {
+        supabase.functions.invoke('mb-search', { body: { emails } }).then(({ data }) => {
+          if (data?.tpv) setTpvMap(data.tpv)
+        })
+      }
+
       setMeetings(((mtgs || []) as any[]).map(m => ({
         id: m.id, activation_id: m.activation_id, gerente_id: m.gerente_id,
         title: m.title, date: m.date, time: (m.time as string)?.slice(0,5) || '',
@@ -461,6 +472,27 @@ function GCContent() {
                 <span style={{ fontSize: 11, fontWeight: 700, color }}>{BRL(a.faturamento_mensal)}/mês</span>
               )}
             </div>
+            {/* TPV do mês */}
+            {(() => {
+              const tpv = tpvMap[a.email?.toLowerCase()]
+              if (!tpv) return null
+              return (
+                <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6,
+                  background: tpv.tpv_mes > 0 ? '#34C75915' : '#FF3B3010',
+                  border: `1px solid ${tpv.tpv_mes > 0 ? '#34C75940' : '#FF3B3030'}`,
+                  borderRadius: 6, padding: '4px 8px' }}>
+                  <span style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em' }}>TPV mês</span>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: tpv.tpv_mes > 0 ? '#34C759' : '#FF3B30' }}>
+                    {BRL(tpv.tpv_mes)}
+                  </span>
+                  {tpv.ultima_venda && (
+                    <span style={{ fontSize: 10, color: 'var(--text2)', marginLeft: 2 }}>
+                      · {new Date(tpv.ultima_venda).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                    </span>
+                  )}
+                </div>
+              )
+            })()}
             {clientMeetings.length > 0 && (
               <div style={{ marginTop: 6, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 {clientMeetings.slice(0,2).map(m => (

@@ -33,8 +33,35 @@ serve(async (req) => {
   const MB_KEY = Deno.env.get('METABASE_API_KEY') ?? ''
   const json = (b: unknown) => new Response(JSON.stringify(b), { headers: { ...CORS, 'Content-Type': 'application/json' } })
 
-  await req.json().catch(() => ({}))
+  const body = await req.json().catch(() => ({}))
 
+  // ── Modo: TPV por lista de emails (para GC kanban) ──────────────────────
+  if (body.emails && Array.isArray(body.emails)) {
+    const emailList = body.emails.map((e: string) => `'${e.replace(/'/g, "''")}'`).join(',')
+    if (!emailList) return json({ tpv: {} })
+
+    const sql = `
+      SELECT
+        u."email",
+        COALESCE(SUM(p."liquidAmount") FILTER (WHERE p."createdAt" >= date_trunc('month', current_date)), 0) AS tpv_mes,
+        COALESCE(MAX(p."createdAt"), NULL) AS ultima_venda
+      FROM "public"."user_user" u
+      LEFT JOIN "public"."payment_payment" p
+        ON p."user_id" = u."id"
+        AND p."status" = 'paid'
+        AND p."paidAt" >= CURRENT_DATE - INTERVAL '30 days'
+      WHERE LOWER(u."email") IN (${emailList.toLowerCase()})
+      GROUP BY u."email"
+    `
+    const { rows } = await runSQL(MB_URL, MB_KEY, sql)
+    const tpv: Record<string, { tpv_mes: number; ultima_venda: string | null }> = {}
+    rows.forEach((r: any[]) => {
+      tpv[r[0]?.toLowerCase()] = { tpv_mes: Number(r[1] ?? 0), ultima_venda: r[2] ?? null }
+    })
+    return json({ tpv })
+  }
+
+  // ── Modo padrão: carteiras por account_manager_id ──────────────────────
   const amIds = Object.keys(GERENTES).join(',')
   let allRows: any[] = []
   let offset = 0
@@ -74,13 +101,13 @@ serve(async (req) => {
   }
 
   const clientes = allRows.map(r => ({
-    gerente:             GERENTES[Number(r[0])] ?? String(r[0]),
-    nome:                r[1],
-    email:               r[2],
-    telefone:            r[3],
-    faturamento:         Number(r[4] ?? 0),
-    tpv_mes:             Number(r[5] ?? 0),
-    ultima_venda:        r[6],
+    gerente:              GERENTES[Number(r[0])] ?? String(r[0]),
+    nome:                 r[1],
+    email:                r[2],
+    telefone:             r[3],
+    faturamento:          Number(r[4] ?? 0),
+    tpv_mes:              Number(r[5] ?? 0),
+    ultima_venda:         r[6],
     previsao_faturamento: Number(r[7] ?? 0),
   }))
 
