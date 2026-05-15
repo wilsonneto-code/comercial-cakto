@@ -3,7 +3,17 @@ import { Header } from '../../components/Header'
 import { useAuth } from '@/lib/authContext'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase/client'
-import { RefreshCw, Search, TrendingUp, DollarSign } from 'lucide-react'
+import { RefreshCw, Search, TrendingUp, DollarSign, MessageSquare } from 'lucide-react'
+import { useToast } from '../../components/ui/Toast'
+
+interface Nota {
+  id?: string
+  email: string
+  motivo: string
+  observacao: string
+  proxima_acao: string
+  data_contato: string
+}
 
 interface CarteiraCli {
   gerente: string
@@ -31,22 +41,46 @@ export default function Carteiras() {
   return <CarteirasContent />
 }
 
+const MOTIVOS = [
+  'Cliente em churn',
+  'Produto pausado',
+  'Problema técnico',
+  'Férias / ausência',
+  'Mudança de estratégia',
+  'Aguardando produto',
+  'Problema financeiro',
+  'Em negociação',
+  'Outro',
+]
+
 function CarteirasContent() {
-  const [clientes, setClientes] = useState<CarteiraCli[]>([])
+  const { user } = useAuth()
+  const toast    = useToast()
+  const [clientes, setClientes]       = useState<CarteiraCli[]>([])
+  const [notas, setNotas]             = useState<Record<string, Nota>>({})
   const [isLoading, setIsLoading]     = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [search, setSearch]           = useState('')
   const [filterCart, setFilterCart]   = useState('todas')
   const [sort, setSort]               = useState<'faturamento' | 'tpv' | 'nome' | 'pct'>('pct')
   const [filterPct, setFilterPct]     = useState<'todos' | 'verde' | 'amarelo' | 'vermelho'>('todos')
+  const [modalCli, setModalCli]       = useState<CarteiraCli | null>(null)
+  const [notaForm, setNotaForm]       = useState<Omit<Nota,'email'>>({ motivo: '', observacao: '', proxima_acao: '', data_contato: '' })
+  const [isSaving, setIsSaving]       = useState(false)
 
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
     setIsLoading(true)
-    const { data, error } = await supabase.functions.invoke('mb-search', { body: {} })
-    if (!error && data?.clientes) {
-      setClientes(data.clientes as CarteiraCli[])
+    const [{ data: mbData }, { data: notasData }] = await Promise.all([
+      supabase.functions.invoke('mb-search', { body: {} }),
+      supabase.from('carteira_notas').select('*'),
+    ])
+    if (mbData?.clientes) setClientes(mbData.clientes as CarteiraCli[])
+    if (notasData) {
+      const map: Record<string, Nota> = {}
+      notasData.forEach((n: any) => { map[n.email] = n })
+      setNotas(map)
     }
     setIsLoading(false)
   }
@@ -55,6 +89,37 @@ function CarteirasContent() {
     setIsRefreshing(true)
     await loadData()
     setIsRefreshing(false)
+  }
+
+  function openModal(c: CarteiraCli) {
+    const existing = notas[c.email]
+    setNotaForm({
+      motivo:       existing?.motivo      ?? '',
+      observacao:   existing?.observacao  ?? '',
+      proxima_acao: existing?.proxima_acao ?? '',
+      data_contato: existing?.data_contato ?? '',
+    })
+    setModalCli(c)
+  }
+
+  async function saveNota() {
+    if (!modalCli) return
+    setIsSaving(true)
+    const payload = {
+      email:        modalCli.email,
+      motivo:       notaForm.motivo,
+      observacao:   notaForm.observacao,
+      proxima_acao: notaForm.proxima_acao,
+      data_contato: notaForm.data_contato || null,
+      criado_por:   user?.id,
+      updated_at:   new Date().toISOString(),
+    }
+    const { error } = await supabase.from('carteira_notas').upsert(payload, { onConflict: 'email' })
+    setIsSaving(false)
+    if (error) { toast(error.message, 'error'); return }
+    setNotas(p => ({ ...p, [modalCli.email]: { ...payload, id: notas[modalCli.email]?.id } as Nota }))
+    toast('Nota salva!', 'success')
+    setModalCli(null)
   }
 
   const gerentes = [...new Set(clientes.map(c => c.gerente))].sort()
@@ -206,7 +271,7 @@ function CarteirasContent() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  {['Cliente', 'Email', 'Telefone', 'Gerente', 'Prev. Fat.', 'TPV Mês', '% Atingido', 'Última Venda'].map(h => (
+                  {['Cliente', 'Email', 'Telefone', 'Gerente', 'Prev. Fat.', 'TPV Mês', '% Atingido', 'Última Venda', ''].map(h => (
                     <th key={h} style={{ padding: '10px 12px', textAlign: h === 'TPV Mês' || h === 'Prev. Fat.' || h === '% Atingido' ? 'right' : 'left',
                       fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
@@ -248,6 +313,18 @@ function CarteirasContent() {
                     <td style={{ padding: '10px 12px', color: 'var(--text2)', fontSize: 12, whiteSpace: 'nowrap' }}>
                       {c.ultima_venda ? new Date(c.ultima_venda).toLocaleDateString('pt-BR') : '—'}
                     </td>
+                    <td style={{ padding: '10px 12px' }}>
+                      <button onClick={() => openModal(c)} title="Adicionar observação" style={{
+                        background: notas[c.email] ? '#2997FF22' : 'var(--bg-card2)',
+                        border: notas[c.email] ? '1px solid #2997FF' : '1px solid var(--border)',
+                        borderRadius: 7, cursor: 'pointer', padding: '4px 8px',
+                        color: notas[c.email] ? '#2997FF' : 'var(--text2)',
+                        display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600,
+                      }}>
+                        <MessageSquare size={12} />
+                        {notas[c.email] ? 'Ver nota' : 'Nota'}
+                      </button>
+                    </td>
                   </tr>
                 ))}
                 {filtered.length === 0 && (
@@ -261,6 +338,57 @@ function CarteirasContent() {
           </div>
         )}
       </div>
+
+      {/* Modal de nota */}
+      {modalCli && (
+        <div style={{ position: 'fixed', inset: 0, background: '#0008', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+          onClick={e => { if (e.target === e.currentTarget) setModalCli(null) }}>
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, padding: 28, width: '100%', maxWidth: 500 }}>
+            <h2 style={{ margin: '0 0 4px', fontSize: 17, fontWeight: 800 }}>Observação do cliente</h2>
+            <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--text2)' }}>{modalCli.nome} — {modalCli.email}</p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Motivo</label>
+                <select value={notaForm.motivo} onChange={e => setNotaForm(p => ({ ...p, motivo: e.target.value }))}
+                  style={{ width: '100%', marginTop: 6, padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card2)', color: 'var(--text)', fontFamily: 'inherit', fontSize: 13 }}>
+                  <option value="">Selecione um motivo...</option>
+                  {MOTIVOS.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Observação</label>
+                <textarea value={notaForm.observacao} onChange={e => setNotaForm(p => ({ ...p, observacao: e.target.value }))}
+                  rows={3} placeholder="Descreva o que está acontecendo com o cliente..."
+                  style={{ width: '100%', marginTop: 6, padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card2)', color: 'var(--text)', fontFamily: 'inherit', fontSize: 13, resize: 'vertical', boxSizing: 'border-box' }} />
+              </div>
+
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Próxima ação</label>
+                <input value={notaForm.proxima_acao} onChange={e => setNotaForm(p => ({ ...p, proxima_acao: e.target.value }))}
+                  placeholder="Ex: Ligar na próxima semana, enviar proposta..."
+                  style={{ width: '100%', marginTop: 6, padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card2)', color: 'var(--text)', fontFamily: 'inherit', fontSize: 13, boxSizing: 'border-box' }} />
+              </div>
+
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Data do último contato</label>
+                <input type="date" value={notaForm.data_contato} onChange={e => setNotaForm(p => ({ ...p, data_contato: e.target.value }))}
+                  style={{ width: '100%', marginTop: 6, padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card2)', color: 'var(--text)', fontFamily: 'inherit', fontSize: 13, boxSizing: 'border-box' }} />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
+              <button onClick={() => setModalCli(null)} style={{ padding: '9px 20px', borderRadius: 8, border: '1px solid var(--border)', background: 'none', color: 'var(--text2)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600 }}>
+                Cancelar
+              </button>
+              <button onClick={saveNota} disabled={isSaving} style={{ padding: '9px 24px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 700 }}>
+                {isSaving ? 'Salvando...' : 'Salvar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }
