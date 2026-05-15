@@ -49,7 +49,8 @@ serve(async (req) => {
         u."cellphone" AS telefone,
         COALESCE(pmt.tpv_30d, 0) AS faturamento_base,
         COALESCE(pmt.tpv_mes, 0) AS tpv_mes,
-        pmt.ultima_venda
+        pmt.ultima_venda,
+        COALESCE(p."estimated_revenue", 0) AS previsao_faturamento
       FROM "public"."user_userportfolio" p
       JOIN "public"."user_user" u ON u."id" = p."user_id"
       LEFT JOIN (
@@ -73,13 +74,14 @@ serve(async (req) => {
   }
 
   const clientes = allRows.map(r => ({
-    gerente:     GERENTES[Number(r[0])] ?? String(r[0]),
-    nome:        r[1],
-    email:       r[2],
-    telefone:    r[3],
-    faturamento: Number(r[4] ?? 0),
-    tpv_mes:     Number(r[5] ?? 0),
-    ultima_venda: r[6],
+    gerente:             GERENTES[Number(r[0])] ?? String(r[0]),
+    nome:                r[1],
+    email:               r[2],
+    telefone:            r[3],
+    faturamento:         Number(r[4] ?? 0),
+    tpv_mes:             Number(r[5] ?? 0),
+    ultima_venda:        r[6],
+    previsao_faturamento: Number(r[7] ?? 0),
   }))
 
   return json({ clientes, total: clientes.length })

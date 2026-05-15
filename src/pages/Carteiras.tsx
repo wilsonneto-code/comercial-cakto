@@ -13,6 +13,7 @@ interface CarteiraCli {
   faturamento: number
   tpv_mes: number | null
   ultima_venda: string | null
+  previsao_faturamento: number
 }
 
 const BRL = (v: number) =>
@@ -174,8 +175,8 @@ function CarteirasContent() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  {['Cliente', 'Email', 'Telefone', 'Gerente', 'Fat. Base', 'TPV Mês', 'Última Venda'].map(h => (
-                    <th key={h} style={{ padding: '10px 12px', textAlign: h === 'Fat. Base' || h === 'TPV Mês' ? 'right' : 'left',
+                  {['Cliente', 'Email', 'Telefone', 'Gerente', 'Prev. Fat.', 'Fat. Base', 'TPV Mês', 'Última Venda'].map(h => (
+                    <th key={h} style={{ padding: '10px 12px', textAlign: h === 'Fat. Base' || h === 'TPV Mês' || h === 'Prev. Fat.' ? 'right' : 'left',
                       fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -190,6 +191,9 @@ function CarteirasContent() {
                       <span style={{ background: 'var(--bg-card2)', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
                         {c.gerente}
                       </span>
+                    </td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: '#BF5AF2', fontWeight: 700 }}>
+                      {c.previsao_faturamento > 0 ? BRL(c.previsao_faturamento) : '—'}
                     </td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{BRL(c.faturamento)}</td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: '#34C759', fontWeight: 700 }}>
