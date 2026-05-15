@@ -203,7 +203,27 @@ function GCContent() {
       const emails = actsList.map(a => a.email).filter(Boolean)
       if (emails.length > 0) {
         supabase.functions.invoke('mb-search', { body: { emails } }).then(({ data }) => {
-          if (data?.tpv) setTpvMap(data.tpv)
+          if (data?.tpv) {
+            const tpv = data.tpv as Record<string, { tpv_mes: number; ultima_venda: string | null }>
+            setTpvMap(tpv)
+
+            // Move automaticamente para "Cliente faturando" se TPV mês > R$1.000
+            const toUpdate = actsList.filter(a => {
+              const t = tpv[a.email?.toLowerCase()]
+              return t && t.tpv_mes > 1000 && a.gc_status !== 'Cliente faturando'
+            })
+            if (toUpdate.length > 0) {
+              const ids = toUpdate.map(a => a.id)
+              supabase.from('activations')
+                .update({ gc_status: 'Cliente faturando' })
+                .in('id', ids)
+                .then(() => {
+                  setActs(prev => prev.map(a =>
+                    ids.includes(a.id) ? { ...a, gc_status: 'Cliente faturando' } : a
+                  ))
+                })
+            }
+          }
           setTpvLoaded(true)
         }).catch(() => setTpvLoaded(true))
       } else {
