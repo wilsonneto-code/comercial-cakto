@@ -74,13 +74,12 @@ serve(async (req) => {
     const sql = `
       SELECT
         u."email",
-        COALESCE(SUM(p."liquidAmount") FILTER (WHERE p."createdAt" >= date_trunc('month', current_date)), 0) AS tpv_mes,
-        COALESCE(MAX(p."createdAt"), NULL) AS ultima_venda
+        COALESCE(SUM(p."liquidAmount") FILTER (WHERE p."paidAt" >= date_trunc('month', current_date)), 0) AS tpv_mes,
+        COALESCE(MAX(p."paidAt"), NULL) AS ultima_venda
       FROM "public"."user_user" u
       LEFT JOIN "public"."payment_payment" p
         ON p."user_id" = u."id"
         AND p."status" = 'paid'
-        AND p."paidAt" >= CURRENT_DATE - INTERVAL '30 days'
       WHERE LOWER(u."email") IN (${emailList.toLowerCase()})
       GROUP BY u."email"
     `
@@ -113,11 +112,11 @@ serve(async (req) => {
       JOIN "public"."user_user" u ON u."id" = p."user_id"
       LEFT JOIN (
         SELECT "user_id",
-          SUM("liquidAmount") AS tpv_30d,
-          SUM("liquidAmount") FILTER (WHERE "createdAt" >= date_trunc('month', current_date)) AS tpv_mes,
-          MAX("createdAt") AS ultima_venda
+          SUM("liquidAmount") FILTER (WHERE "paidAt" >= CURRENT_DATE - INTERVAL '30 days') AS tpv_30d,
+          SUM("liquidAmount") FILTER (WHERE "paidAt" >= date_trunc('month', current_date)) AS tpv_mes,
+          MAX("paidAt") AS ultima_venda
         FROM "public"."payment_payment"
-        WHERE "status" = 'paid' AND "paidAt" >= CURRENT_DATE - INTERVAL '30 days'
+        WHERE "status" = 'paid'
         GROUP BY "user_id"
       ) pmt ON pmt."user_id" = u."id"
       WHERE p."account_manager_id" IN (${amIds})
