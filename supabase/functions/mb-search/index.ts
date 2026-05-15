@@ -150,48 +150,62 @@ serve(async (req) => {
   if (body.explore_payments_cakto) {
     const userId = Number(body.user_id)
     const dbId   = Number(body.db_id ?? 4)
-    // Tenta as tabelas payment-related do Cakto #4
-    const tables = [
-      'gateway_order', 'gateway_payment_orders', 'gateway_subscription',
-    ]
-    const results: any[] = []
-    for (const table of tables) {
-      // Primeiro pega as colunas da tabela
-      const colRes = await fetch(`${MB_URL}/api/dataset`, {
+
+    async function runQ(sql: string) {
+      const r = await fetch(`${MB_URL}/api/dataset`, {
         method: 'POST',
         headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ database: dbId, type: 'native', native: { query: `SELECT * FROM "public"."${table}" LIMIT 1` } }),
+        body: JSON.stringify({ database: dbId, type: 'native', native: { query: sql } }),
       })
-      const colData = await colRes.json()
-      const cols = colData?.data?.cols?.map((c: any) => c.name) ?? []
-
-      // Tenta por user_id com vários nomes de campo
-      for (const userField of ['user_id', 'buyer_id', 'customer_id', 'payer_id']) {
-        if (!cols.includes(userField)) continue
-        const sql = `
-          SELECT status, COUNT(*) as count,
-            SUM(amount) as total_amount,
-            SUM(value) as total_value
-          FROM "public"."${table}"
-          WHERE "${userField}" = ${userId}
-          GROUP BY status
-          ORDER BY count DESC
-        `
-        const r = await fetch(`${MB_URL}/api/dataset`, {
-          method: 'POST',
-          headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ database: dbId, type: 'native', native: { query: sql } }),
-        })
-        const d = await r.json()
-        if (!d?.error && (d?.data?.rows?.length ?? 0) > 0) {
-          results.push({ table, userField, cols: d.data.cols.map((c: any) => c.name), rows: d.data.rows })
-        }
-      }
-      // Também tenta sample sem filtro para ver estrutura
-      if (results.length === 0 && cols.length > 0) {
-        results.push({ table, userField: '(sample)', cols, rows: colData?.data?.rows ?? [] })
-      }
+      const d = await r.json()
+      return { cols: d?.data?.cols?.map((c: any) => c.name) ?? [], rows: d?.data?.rows ?? [], error: d?.error ?? null }
     }
+
+    const results: any[] = []
+
+    // 1. vendas_por_usuario — parece ser um view/tabela agregada por usuário
+    const vendasSample = await runQ(`SELECT * FROM "public"."vendas_por_usuario" WHERE user_id = ${userId} LIMIT 5`)
+    if (!vendasSample.error && vendasSample.rows.length > 0)
+      results.push({ table: 'vendas_por_usuario', note: 'VIEW de vendas por usuário', ...vendasSample })
+    else {
+      // Tenta sem filtro para ver estrutura
+      const vendasAll = await runQ(`SELECT * FROM "public"."vendas_por_usuario" LIMIT 3`)
+      results.push({ table: 'vendas_por_usuario (sample)', note: `user_id ${userId} não encontrado — amostra`, ...vendasAll })
+    }
+
+    // 2. gateway_order — orders diretos
+    const goSample = await runQ(`SELECT * FROM "public"."gateway_order" LIMIT 1`)
+    const goCols = goSample.cols
+    const goUserField = ['user_id','buyer_id','customer_id'].find(f => goCols.includes(f))
+    if (goUserField) {
+      const go = await runQ(`SELECT status, COUNT(*) as count, SUM(amount) as total FROM "public"."gateway_order" WHERE "${goUserField}" = ${userId} GROUP BY status`)
+      if (!go.error) results.push({ table: 'gateway_order', note: `por ${goUserField}`, ...go })
+    } else {
+      results.push({ table: 'gateway_order (colunas)', note: 'sem user_id conhecido — mostra colunas', cols: goCols, rows: goSample.rows })
+    }
+
+    // 3. gateway_payment_orders
+    const gpSample = await runQ(`SELECT * FROM "public"."gateway_payment_orders" LIMIT 1`)
+    const gpCols = gpSample.cols
+    const gpUserField = ['user_id','buyer_id','customer_id','order_id'].find(f => gpCols.includes(f))
+    if (gpUserField) {
+      const gp = await runQ(`SELECT status, COUNT(*) as count, SUM(amount) as total FROM "public"."gateway_payment_orders" WHERE "${gpUserField}" = ${userId} GROUP BY status`)
+      if (!gp.error) results.push({ table: 'gateway_payment_orders', note: `por ${gpUserField}`, ...gp })
+    } else {
+      results.push({ table: 'gateway_payment_orders (colunas)', note: 'sem user_id — mostra colunas', cols: gpCols, rows: gpSample.rows })
+    }
+
+    // 4. gateway_subscription
+    const gsSample = await runQ(`SELECT * FROM "public"."gateway_subscription" LIMIT 1`)
+    const gsCols = gsSample.cols
+    const gsUserField = ['user_id','subscriber_id','customer_id'].find(f => gsCols.includes(f))
+    if (gsUserField) {
+      const gs = await runQ(`SELECT status, COUNT(*) as count, SUM(amount) as total FROM "public"."gateway_subscription" WHERE "${gsUserField}" = ${userId} GROUP BY status`)
+      if (!gs.error) results.push({ table: 'gateway_subscription', note: `por ${gsUserField}`, ...gs })
+    } else {
+      results.push({ table: 'gateway_subscription (colunas)', note: 'mostra colunas', cols: gsCols, rows: gsSample.rows })
+    }
+
     return json({ results })
   }
 
