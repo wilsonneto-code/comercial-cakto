@@ -66,6 +66,47 @@ serve(async (req) => {
     return json({ daily })
   }
 
+  // ── Modo: listar bancos disponíveis no Metabase ─────────────────────────
+  if (body.list_databases) {
+    const res = await fetch(`${MB_URL}/api/database`, {
+      headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
+    })
+    const data = await res.json()
+    const dbs = (data?.data ?? data ?? []).map((d: any) => ({
+      id: d.id, name: d.name, engine: d.engine,
+    }))
+    return json({ databases: dbs })
+  }
+
+  // ── Modo: testar query em banco específico ───────────────────────────────
+  if (body.test_db && body.debug_email) {
+    const dbId  = Number(body.test_db)
+    const email = body.debug_email.toLowerCase().replace(/'/g, "''")
+    const sql = `
+      SELECT u."id", u."email",
+        COUNT(p."id") AS total_payments,
+        COUNT(p."id") FILTER (WHERE p."status" = 'paid') AS paid_count,
+        SUM(p."liquidAmount") FILTER (WHERE p."status" = 'paid') AS total_liquid,
+        MIN(DISTINCT p."status") AS sample_status
+      FROM "public"."user_user" u
+      LEFT JOIN "public"."payment_payment" p ON p."user_id" = u."id"
+      WHERE LOWER(u."email") = '${email}'
+      GROUP BY u."id", u."email"
+    `
+    const res = await fetch(`${MB_URL}/api/dataset`, {
+      method: 'POST',
+      headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ database: dbId, type: 'native', native: { query: sql } }),
+    })
+    const data = await res.json()
+    return json({
+      db_id: dbId,
+      cols: data?.data?.cols?.map((c: any) => c.name) ?? [],
+      rows: data?.data?.rows ?? [],
+      error: data?.error ?? null,
+    })
+  }
+
   // ── Modo debug: inspecionar pagamentos brutos de um email ───────────────
   if (body.debug_email) {
     const email = body.debug_email.toLowerCase().replace(/'/g, "''")
