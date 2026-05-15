@@ -35,6 +35,37 @@ serve(async (req) => {
 
   const body = await req.json().catch(() => ({}))
 
+  // ── Modo: TPV diário por mês (para gráfico de crescimento) ─────────────
+  if (body.daily_tpv && body.month) {
+    const [y, m] = (body.month as string).split('-')
+    const inicio = `${y}-${m}-01`
+    const fim    = `${y}-${m}-31`
+    const ids: number[] = Array.isArray(body.account_manager_ids) && body.account_manager_ids.length
+      ? body.account_manager_ids
+      : Object.keys(GERENTES).map(Number)
+    const amList = ids.join(',')
+
+    const sql = `
+      SELECT
+        DATE(p."paidAt") AS dia,
+        COALESCE(SUM(p."liquidAmount"), 0) AS tpv_dia
+      FROM "public"."payment_payment" p
+      JOIN "public"."user_userportfolio" up ON up."user_id" = p."user_id"
+      WHERE up."account_manager_id" IN (${amList})
+        AND p."status" = 'paid'
+        AND DATE(p."paidAt") >= '${inicio}'
+        AND DATE(p."paidAt") <= '${fim}'
+      GROUP BY DATE(p."paidAt")
+      ORDER BY dia
+    `
+    const { rows } = await runSQL(MB_URL, MB_KEY, sql)
+    const daily: Record<string, number> = {}
+    rows.forEach((r: any[]) => {
+      if (r[0]) daily[String(r[0]).slice(0, 10)] = Number(r[1] ?? 0)
+    })
+    return json({ daily })
+  }
+
   // ── Modo: TPV por lista de emails (para GC kanban) ──────────────────────
   if (body.emails && Array.isArray(body.emails)) {
     const emailList = body.emails.map((e: string) => `'${e.replace(/'/g, "''")}'`).join(',')
