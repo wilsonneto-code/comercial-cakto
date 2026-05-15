@@ -199,31 +199,52 @@ function GCContent() {
       const actsList = (acts || []) as DbActivation[]
       setActs(actsList)
 
-      // Busca TPV do mês via portfólio completo do Metabase (query por account_manager_id)
-      supabase.functions.invoke('mb-search', { body: {} }).then(({ data }) => {
-        if (data?.clientes) {
-          const tpv: Record<string, { tpv_mes: number; ultima_venda: string | null }> = {}
-          ;(data.clientes as any[]).forEach(c => {
+      // Busca TPV: combina portfólio (account_manager_id) + query direta por email
+      // para cobrir clientes sem gerente no Metabase
+      const emails = actsList.map(a => a.email).filter(Boolean)
+      Promise.all([
+        supabase.functions.invoke('mb-search', { body: {} }),
+        emails.length > 0
+          ? supabase.functions.invoke('mb-search', { body: { emails } })
+          : Promise.resolve({ data: null }),
+      ]).then(([portfolioRes, emailRes]) => {
+        const tpv: Record<string, { tpv_mes: number; ultima_venda: string | null }> = {}
+
+        // 1. Dados do portfólio (mais completos para quem tem account_manager)
+        if (portfolioRes.data?.clientes) {
+          ;(portfolioRes.data.clientes as any[]).forEach(c => {
             if (c.email) tpv[c.email.toLowerCase()] = { tpv_mes: c.tpv_mes ?? 0, ultima_venda: c.ultima_venda ?? null }
           })
-          setTpvMap(tpv)
+        }
 
-          // Move automaticamente para "Cliente faturando" se TPV mês > R$1.000
-          const toUpdate = actsList.filter(a => {
-            const t = tpv[a.email?.toLowerCase()]
-            return t && t.tpv_mes > 1000 && a.gc_status !== 'Cliente faturando'
+        // 2. Query direta por email — cobre clientes fora do portfólio
+        if (emailRes.data?.tpv) {
+          Object.entries(emailRes.data.tpv as Record<string, any>).forEach(([email, val]: [string, any]) => {
+            // Só sobrescreve se não veio do portfólio ou se o valor direto for maior
+            const existing = tpv[email]
+            if (!existing || val.tpv_mes > existing.tpv_mes) {
+              tpv[email] = { tpv_mes: val.tpv_mes ?? 0, ultima_venda: val.ultima_venda ?? null }
+            }
           })
-          if (toUpdate.length > 0) {
-            const ids = toUpdate.map(a => a.id)
-            supabase.from('activations')
-              .update({ gc_status: 'Cliente faturando' })
-              .in('id', ids)
-              .then(() => {
-                setActs(prev => prev.map(a =>
-                  ids.includes(a.id) ? { ...a, gc_status: 'Cliente faturando' } : a
-                ))
-              })
-          }
+        }
+
+        setTpvMap(tpv)
+
+        // Move automaticamente para "Cliente faturando" se TPV mês > R$1.000
+        const toUpdate = actsList.filter(a => {
+          const t = tpv[a.email?.toLowerCase()]
+          return t && t.tpv_mes > 1000 && a.gc_status !== 'Cliente faturando'
+        })
+        if (toUpdate.length > 0) {
+          const ids = toUpdate.map(a => a.id)
+          supabase.from('activations')
+            .update({ gc_status: 'Cliente faturando' })
+            .in('id', ids)
+            .then(() => {
+              setActs(prev => prev.map(a =>
+                ids.includes(a.id) ? { ...a, gc_status: 'Cliente faturando' } : a
+              ))
+            })
         }
         setTpvLoaded(true)
       }).catch(() => setTpvLoaded(true))
