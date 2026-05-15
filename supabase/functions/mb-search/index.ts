@@ -109,16 +109,13 @@ serve(async (req) => {
     const sql = `
       SELECT
         u."email",
-        COALESCE(SUM(
-          GREATEST(COALESCE(p."liquidAmount", 0), COALESCE(p."amount", 0))
-        ) FILTER (
-          WHERE COALESCE(p."paidAt", p."createdAt") >= date_trunc('month', current_date)
+        COALESCE(SUM(p."liquidAmount") FILTER (
+          WHERE p."status" = 'paid'
+            AND p."createdAt" >= date_trunc('month', current_date)
         ), 0) AS tpv_mes,
-        COALESCE(MAX(COALESCE(p."paidAt", p."createdAt")), NULL) AS ultima_venda
+        COALESCE(MAX(p."createdAt") FILTER (WHERE p."status" = 'paid'), NULL) AS ultima_venda
       FROM "public"."user_user" u
-      LEFT JOIN "public"."payment_payment" p
-        ON p."user_id" = u."id"
-        AND LOWER(p."status") IN ('paid', 'approved', 'completed', 'pago')
+      LEFT JOIN "public"."payment_payment" p ON p."user_id" = u."id"
       WHERE LOWER(u."email") IN (${emailList.toLowerCase()})
       GROUP BY u."email"
     `
@@ -151,13 +148,12 @@ serve(async (req) => {
       JOIN "public"."user_user" u ON u."id" = p."user_id"
       LEFT JOIN (
         SELECT "user_id",
-          SUM(GREATEST(COALESCE("liquidAmount", 0), COALESCE("amount", 0)))
-            FILTER (WHERE COALESCE("paidAt","createdAt") >= CURRENT_DATE - INTERVAL '30 days') AS tpv_30d,
-          SUM(GREATEST(COALESCE("liquidAmount", 0), COALESCE("amount", 0)))
-            FILTER (WHERE COALESCE("paidAt","createdAt") >= date_trunc('month', current_date)) AS tpv_mes,
-          MAX(COALESCE("paidAt","createdAt")) AS ultima_venda
+          SUM("liquidAmount") FILTER (WHERE "status" = 'paid'
+            AND "createdAt" >= CURRENT_DATE - INTERVAL '30 days') AS tpv_30d,
+          SUM("liquidAmount") FILTER (WHERE "status" = 'paid'
+            AND "createdAt" >= date_trunc('month', current_date)) AS tpv_mes,
+          MAX("createdAt") FILTER (WHERE "status" = 'paid') AS ultima_venda
         FROM "public"."payment_payment"
-        WHERE LOWER("status") IN ('paid', 'approved', 'completed', 'pago')
         GROUP BY "user_id"
       ) pmt ON pmt."user_id" = u."id"
       WHERE p."account_manager_id" IN (${amIds})
