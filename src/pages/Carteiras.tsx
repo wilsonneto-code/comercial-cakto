@@ -175,8 +175,8 @@ function CarteirasContent() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  {['Cliente', 'Email', 'Telefone', 'Gerente', 'Prev. Fat.', 'Fat. Base', 'TPV Mês', 'Última Venda'].map(h => (
-                    <th key={h} style={{ padding: '10px 12px', textAlign: h === 'Fat. Base' || h === 'TPV Mês' || h === 'Prev. Fat.' ? 'right' : 'left',
+                  {['Cliente', 'Email', 'Telefone', 'Gerente', 'Prev. Fat.', 'TPV Mês', '% Atingido', 'Última Venda'].map(h => (
+                    <th key={h} style={{ padding: '10px 12px', textAlign: h === 'TPV Mês' || h === 'Prev. Fat.' || h === '% Atingido' ? 'right' : 'left',
                       fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -195,9 +195,20 @@ function CarteirasContent() {
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: '#BF5AF2', fontWeight: 700 }}>
                       {c.previsao_faturamento > 0 ? BRL(c.previsao_faturamento) : '—'}
                     </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{BRL(c.faturamento)}</td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: '#34C759', fontWeight: 700 }}>
                       {c.tpv_mes != null ? BRL(c.tpv_mes) : '—'}
+                    </td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                      {(() => {
+                        if (!c.previsao_faturamento) return <span style={{ color: 'var(--text2)' }}>—</span>
+                        const pct = Math.min((c.tpv_mes ?? 0) / c.previsao_faturamento * 100, 999)
+                        const color = pct >= 80 ? '#34C759' : pct >= 50 ? '#FF9F0A' : '#FF3B30'
+                        return (
+                          <span style={{ color, fontWeight: 700 }}>
+                            {pct.toFixed(1)}%
+                          </span>
+                        )
+                      })()}
                     </td>
                     <td style={{ padding: '10px 12px', color: 'var(--text2)', fontSize: 12, whiteSpace: 'nowrap' }}>
                       {c.ultima_venda ? new Date(c.ultima_venda).toLocaleDateString('pt-BR') : '—'}
@@ -205,7 +216,7 @@ function CarteirasContent() {
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={8} style={{ padding: 40, textAlign: 'center', color: 'var(--text2)' }}>Nenhum cliente encontrado.</td></tr>
+                  <tr><td colSpan={7} style={{ padding: 40, textAlign: 'center', color: 'var(--text2)' }}>Nenhum cliente encontrado.</td></tr>
                 )}
               </tbody>
             </table>
