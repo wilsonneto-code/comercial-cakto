@@ -18,6 +18,7 @@ import DashboardLifetime from './pages/DashboardLifetime'
 import PublicForm from './pages/PublicForm'
 import Pagamentos from './pages/Pagamentos'
 import Carteiras from './pages/Carteiras'
+import DashboardGC from './pages/DashboardGC'
 
 const MAIN_DOMAINS = [
   'localhost',
@@ -78,6 +79,7 @@ export default function App() {
       <Route path="/pagamentos" element={<ProtectedRoute><Pagamentos /></ProtectedRoute>} />
       <Route path="/carteiras" element={<ProtectedRoute><Carteiras /></ProtectedRoute>} />
       <Route path="/metabase" element={<ProtectedRoute><Carteiras /></ProtectedRoute>} />
+      <Route path="/dashboard-gc" element={<ProtectedRoute><DashboardGC /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
