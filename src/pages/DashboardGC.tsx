@@ -7,6 +7,20 @@ import { DonutChart } from '@/components/ui/charts/DonutChart'
 import { BarChartH } from '@/components/ui/charts/BarChartH'
 import { TrendingUp, Users, DollarSign, AlertTriangle, CheckCircle, MessageSquare, RefreshCw, ChevronLeft } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { DateRangeFilter } from './DashboardSDR'
+import type { } from './DashboardSDR'
+
+type Preset = 'hoje' | '7d' | '15d' | 'mes' | 'custom'
+const fmtDate = (d: Date) => d.toISOString().split('T')[0]
+const subDays  = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return fmtDate(d) }
+function getRangeGC(preset: Preset, customFrom: string, customTo: string) {
+  const today = new Date()
+  if (preset === 'hoje') return { inicio: fmtDate(today), fim: fmtDate(today) }
+  if (preset === '7d')   return { inicio: subDays(6),     fim: fmtDate(today) }
+  if (preset === '15d')  return { inicio: subDays(14),    fim: fmtDate(today) }
+  if (preset === 'mes') { const m = fmtDate(today).slice(0,7); return { inicio: `${m}-01`, fim: `${m}-31` } }
+  return { inicio: customFrom || fmtDate(today), fim: customTo || fmtDate(today) }
+}
 
 interface Cliente {
   gerente: string; nome: string; email: string; telefone: string
@@ -45,7 +59,11 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
   const [notas, setNotas]         = useState<Nota[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isRefresh, setIsRefresh] = useState(false)
-  const [gerente, setGerente]     = useState('todos')
+  const [gerente,    setGerente]    = useState('todos')
+  const [preset,     setPreset]     = useState<Preset>('mes')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo,   setCustomTo]   = useState('')
+  const { inicio, fim } = getRangeGC(preset, customFrom, customTo)
 
   useEffect(() => { load() }, [])
 
@@ -116,7 +134,8 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
     .slice(0, 5)
 
   const ultimosContatos = notas
-    .filter(n => base.find(c => c.email === n.email) && n.data_contato)
+    .filter(n => base.find(c => c.email === n.email) && n.data_contato
+      && n.data_contato >= inicio && n.data_contato <= fim)
     .sort((a, b) => new Date(b.data_contato!).getTime() - new Date(a.data_contato!).getTime())
     .slice(0, 5)
 
@@ -146,7 +165,12 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
               {new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })} · {total} clientes na carteira
             </p>
           </div>
-          <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <DateRangeFilter
+              preset={preset} onPreset={setPreset}
+              customFrom={customFrom} customTo={customTo}
+              onCustomFrom={setCustomFrom} onCustomTo={setCustomTo}
+            />
             {isAdmin && (
               <select value={gerente} onChange={e => setGerente(e.target.value)}
                 style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text)', fontFamily: 'inherit', fontSize: 13 }}>
@@ -155,9 +179,8 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
               </select>
             )}
             <button onClick={refresh} disabled={isRefresh}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text2)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600 }}>
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text2)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600 }}>
               <RefreshCw size={14} style={{ animation: isRefresh ? 'spin 1s linear infinite' : 'none' }} />
-              Atualizar
             </button>
           </div>
         </div>

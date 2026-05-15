@@ -30,8 +30,68 @@ interface SdrRow {
   score: number
 }
 
+type Preset = 'hoje' | '7d' | '15d' | 'mes' | 'custom'
+
 const COR = { verde: '#34C759', amarelo: '#FF9F0A', vermelho: '#FF3B30', azul: '#2997FF', roxo: '#BF5AF2' }
 const pctColor = (p: number, meta: number) => p >= meta ? COR.verde : p >= meta * 0.6 ? COR.amarelo : COR.vermelho
+
+const fmt = (d: Date) => d.toISOString().split('T')[0]
+const sub = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return fmt(d) }
+
+function getRange(preset: Preset, customFrom: string, customTo: string): { inicio: string; fim: string; label: string } {
+  const today = new Date()
+  if (preset === 'hoje') return { inicio: fmt(today), fim: fmt(today), label: 'Hoje' }
+  if (preset === '7d')   return { inicio: sub(6),     fim: fmt(today), label: 'Últimos 7 dias' }
+  if (preset === '15d')  return { inicio: sub(14),    fim: fmt(today), label: 'Últimos 15 dias' }
+  if (preset === 'mes') {
+    const mes = fmt(today).slice(0, 7)
+    return { inicio: `${mes}-01`, fim: `${mes}-31`, label: new Date(mes + '-01').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) }
+  }
+  const from = customFrom || fmt(today)
+  const to   = customTo   || fmt(today)
+  return { inicio: from, fim: to, label: `${new Date(from + 'T12:00').toLocaleDateString('pt-BR')} – ${new Date(to + 'T12:00').toLocaleDateString('pt-BR')}` }
+}
+
+// ── Componente de filtro de data reutilizável ─────────────────────────────
+export function DateRangeFilter({
+  preset, onPreset, customFrom, customTo, onCustomFrom, onCustomTo,
+}: {
+  preset: Preset; onPreset: (p: Preset) => void
+  customFrom: string; customTo: string
+  onCustomFrom: (v: string) => void; onCustomTo: (v: string) => void
+}) {
+  const presets: { key: Preset; label: string }[] = [
+    { key: 'hoje', label: 'Hoje' },
+    { key: '7d',   label: '7 dias' },
+    { key: '15d',  label: '15 dias' },
+    { key: 'mes',  label: 'Este mês' },
+    { key: 'custom', label: 'Personalizado' },
+  ]
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', background: 'var(--bg-card2)', borderRadius: 10, padding: 3, gap: 2 }}>
+        {presets.map(p => (
+          <button key={p.key} onClick={() => onPreset(p.key)}
+            style={{ padding: '6px 13px', borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+              fontSize: 12, fontWeight: 600, transition: 'all .15s',
+              background: preset === p.key ? 'var(--action)' : 'transparent',
+              color: preset === p.key ? '#fff' : 'var(--text2)' }}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+      {preset === 'custom' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input type="date" value={customFrom} onChange={e => onCustomFrom(e.target.value)}
+            style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text)', fontFamily: 'inherit', fontSize: 12 }} />
+          <span style={{ color: 'var(--text2)', fontSize: 12 }}>até</span>
+          <input type="date" value={customTo} onChange={e => onCustomTo(e.target.value)}
+            style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text)', fontFamily: 'inherit', fontSize: 12 }} />
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function DashboardSDR() {
   const { user, loading } = useAuth()
@@ -49,14 +109,17 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
   const [calls, setCalls]         = useState<Call[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isRefresh, setIsRefresh] = useState(false)
-  const [mes, setMes]             = useState(() => new Date().toISOString().slice(0, 7))
 
-  useEffect(() => { load() }, [mes])
+  const [preset,     setPreset]     = useState<Preset>('mes')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo,   setCustomTo]   = useState('')
+
+  const { inicio, fim, label: rangeLabel } = getRange(preset, customFrom, customTo)
+
+  useEffect(() => { load() }, [inicio, fim])
 
   async function load() {
     setIsLoading(true)
-    const inicio = `${mes}-01`
-    const fim    = `${mes}-31`
     const { data } = await supabase
       .from('calls')
       .select('id,date,status,sdr_nome,responsible,ativado,motivo_nao_ativacao')
@@ -96,7 +159,6 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
   const sdrs: SdrRow[] = Object.entries(sdrMap).map(([nome, v]) => {
     const pctR = v.ag > 0 ? v.re / v.ag * 100 : 0
     const pctA = v.re > 0 ? v.at / v.re * 100 : 0
-    // Score: (realizadas/160 + pctAtiv/30) / 2 * 100
     const score = Math.round(((v.re / 160) + (pctA / 30)) / 2 * 100)
     return { nome, agendadas: v.ag, realizadas: v.re, noshow: v.ns, canceladas: v.ca, ativadas: v.at, pctRealizacao: pctR, pctAtivacao: pctA, score }
   }).sort((a, b) => b.score - a.score)
@@ -112,7 +174,6 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
   const barAgendadas  = sdrs.map(s => ({ label: s.nome.split(' ')[0], value: s.agendadas }))
   const barRealizadas = sdrs.map(s => ({ label: s.nome.split(' ')[0], value: s.realizadas }))
 
-  // Motivos não ativação
   const motivosMap: Record<string, number> = {}
   base.filter(c => c.motivo_nao_ativacao).forEach(c => {
     const m = c.motivo_nao_ativacao!
@@ -122,7 +183,6 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
     .sort((a, b) => b[1] - a[1]).slice(0, 7)
     .map(([label, value]) => ({ label: label.length > 22 ? label.slice(0, 20) + '…' : label, value }))
 
-  // Funil de conversão
   const funil = [
     { label: 'Agendadas',  value: agendadas,  pct: 100,                                           color: COR.azul    },
     { label: 'Realizadas', value: realizadas, pct: agendadas > 0 ? realizadas/agendadas*100 : 0,  color: COR.verde   },
@@ -142,23 +202,26 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
       <div className="page-wrap" style={{ paddingTop: 88 }}>
 
         {/* Topo */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {onBack && <Button variant="ghost" icon={ChevronLeft} onClick={onBack}>Voltar</Button>}
-            <div>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24, gap: 16, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+              {onBack && <Button variant="ghost" icon={ChevronLeft} onClick={onBack}>Voltar</Button>}
               <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>
                 {isSdr ? `Dashboard — ${user?.name}` : 'Dashboard SDR'}
               </h1>
-              <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text2)' }}>
-                {new Date(mes + '-01').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })} · {agendadas} calls no período
-              </p>
             </div>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--text2)' }}>
+              {rangeLabel} · {agendadas} calls no período
+            </p>
           </div>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <input type="month" value={mes} onChange={e => setMes(e.target.value)}
-              style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text)', fontFamily: 'inherit', fontSize: 13 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <DateRangeFilter
+              preset={preset} onPreset={setPreset}
+              customFrom={customFrom} customTo={customTo}
+              onCustomFrom={setCustomFrom} onCustomTo={setCustomTo}
+            />
             <button onClick={refresh} disabled={isRefresh}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text2)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600 }}>
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text2)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600 }}>
               <RefreshCw size={14} style={{ animation: isRefresh ? 'spin 1s linear infinite' : 'none' }} />
             </button>
           </div>
@@ -188,7 +251,6 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
         {/* Linha 1: Donut + Funil + Motivos */}
         <div style={{ display: 'grid', gridTemplateColumns: '200px 220px 1fr', gap: 16, marginBottom: 16 }}>
 
-          {/* Donut status */}
           <div style={{ ...card, padding: '20px' }}>
             {lbl('Status das Calls')}
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
@@ -206,7 +268,6 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
             </div>
           </div>
 
-          {/* Funil */}
           <div style={{ ...card, padding: '20px' }}>
             {lbl('Funil de Conversão')}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -229,7 +290,6 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
             </div>
           </div>
 
-          {/* Motivos não ativação */}
           <div style={{ ...card, padding: '20px' }}>
             {lbl('Motivos de Não Ativação')}
             {barMotivos.length === 0 ? (
@@ -332,7 +392,7 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
                 </div>
               </div>
               <div style={{ ...card, padding: '20px' }}>
-                {lbl('Resumo do Mês')}
+                {lbl('Resumo do Período')}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   {[
                     { label: 'Agendadas',  val: s.agendadas,  color: COR.azul    },
