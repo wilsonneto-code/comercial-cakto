@@ -20,7 +20,7 @@ type CarteiraNota = { email: string; motivo: string | null; data_contato: string
 
 const COR = { verde: '#34C759', amarelo: '#FF9F0A', vermelho: '#FF3B30', azul: '#2997FF', roxo: '#BF5AF2' }
 
-type Preset = 'hoje' | '7d' | '15d' | '30d' | 'custom'
+type Preset = 'hoje' | '7d' | '15d' | '30d' | 'mes' | 'custom'
 
 const fmt = (d: Date) => d.toISOString().split('T')[0]
 const sub = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return fmt(d) }
@@ -31,6 +31,10 @@ function getRange(preset: Preset, customFrom: string, customTo: string) {
   if (preset === '7d')   return { inicio: sub(6),     fim: fmt(today), label: 'Últimos 7 dias' }
   if (preset === '15d')  return { inicio: sub(14),    fim: fmt(today), label: 'Últimos 15 dias' }
   if (preset === '30d')  return { inicio: sub(29),    fim: fmt(today), label: 'Últimos 30 dias' }
+  if (preset === 'mes') {
+    const m = fmt(today).slice(0, 7)
+    return { inicio: `${m}-01`, fim: `${m}-31`, label: today.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) }
+  }
   const from = customFrom || fmt(today)
   const to   = customTo   || fmt(today)
   return {
@@ -107,11 +111,12 @@ function RelatoriosContent({ onBack }: { onBack?: () => void }) {
   )
 
   const PRESETS: { key: Preset; label: string }[] = [
-    { key: 'hoje', label: 'Hoje'    },
-    { key: '7d',   label: '7 dias'  },
-    { key: '15d',  label: '15 dias' },
-    { key: '30d',  label: '30 dias' },
-    { key: 'custom', label: 'Personalizado' },
+    { key: 'hoje',   label: 'Hoje'         },
+    { key: '7d',     label: '7 dias'       },
+    { key: '15d',    label: '15 dias'      },
+    { key: '30d',    label: '30 dias'      },
+    { key: 'mes',    label: 'Mês atual'    },
+    { key: 'custom', label: 'Personalizado'},
   ]
 
   if (isLoading) return (
