@@ -6,20 +6,13 @@ import { supabase } from '@/lib/supabase/client'
 import { RefreshCw, Search, TrendingUp, DollarSign } from 'lucide-react'
 
 interface CarteiraCli {
-  carteira: string
-  ranking: number
+  gerente: string
   nome: string
   email: string
   telefone: string
   faturamento: number
   tpv_mes: number | null
   ultima_venda: string | null
-}
-
-const GERENTES: Record<string, string> = {
-  'Carteira 1': 'Isaac',
-  'Carteira 2': 'Rafael Mendes',
-  'Carteira 3': 'Gabriel Bairros',
 }
 
 const BRL = (v: number) =>
@@ -49,19 +42,9 @@ function CarteirasContent() {
 
   async function loadData() {
     setIsLoading(true)
-    const { data, error } = await supabase.functions.invoke('mb-search', { body: { card_id: 1660 } })
-    if (!error && data?.rows) {
-      const rows: CarteiraCli[] = data.rows.map((r: any[]) => ({
-        carteira:     r[0],
-        ranking:      r[1],
-        nome:         r[2],
-        email:        r[3],
-        telefone:     r[4],
-        faturamento:  Number(r[5] ?? 0),
-        tpv_mes:      r[6] != null ? Number(r[6]) : null,
-        ultima_venda: r[7] ?? null,
-      }))
-      setClientes(rows)
+    const { data, error } = await supabase.functions.invoke('mb-search', { body: {} })
+    if (!error && data?.clientes) {
+      setClientes(data.clientes as CarteiraCli[])
     }
     setIsLoading(false)
   }
@@ -72,10 +55,10 @@ function CarteirasContent() {
     setIsRefreshing(false)
   }
 
-  const carteirasDisponiveis = [...new Set(clientes.map(c => c.carteira))].sort()
+  const gerentes = [...new Set(clientes.map(c => c.gerente))].sort()
 
   const filtered = clientes
-    .filter(c => filterCart === 'todas' || c.carteira === filterCart)
+    .filter(c => filterCart === 'todas' || c.gerente === filterCart)
     .filter(c => {
       const q = search.toLowerCase()
       return !q || c.nome?.toLowerCase().includes(q) || c.email?.toLowerCase().includes(q)
@@ -86,12 +69,11 @@ function CarteirasContent() {
       return b.faturamento - a.faturamento
     })
 
-  // resumo por carteira
-  const resumo = carteirasDisponiveis.map(cart => {
-    const cls = clientes.filter(c => c.carteira === cart)
+  // resumo por gerente
+  const resumo = gerentes.map(g => {
+    const cls = clientes.filter(c => c.gerente === g)
     return {
-      carteira: cart,
-      gerente: GERENTES[cart] ?? cart,
+      gerente: g,
       total: cls.length,
       fat_total: cls.reduce((s, c) => s + c.faturamento, 0),
       tpv_total: cls.reduce((s, c) => s + (c.tpv_mes ?? 0), 0),
@@ -134,9 +116,9 @@ function CarteirasContent() {
         {!isLoading && (
           <div style={{ display: 'grid', gridTemplateColumns: `repeat(${resumo.length}, 1fr)`, gap: 16, marginBottom: 28 }}>
             {resumo.map(r => (
-              <div key={r.carteira} style={{ ...card(), padding: '20px 24px', cursor: 'pointer',
-                outline: filterCart === r.carteira ? '2px solid var(--accent)' : 'none' }}
-                onClick={() => setFilterCart(filterCart === r.carteira ? 'todas' : r.carteira)}>
+              <div key={r.gerente} style={{ ...card(), padding: '20px 24px', cursor: 'pointer',
+                outline: filterCart === r.gerente ? '2px solid var(--accent)' : 'none' }}
+                onClick={() => setFilterCart(filterCart === r.gerente ? 'todas' : r.gerente)}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>
                   {r.gerente}
                 </div>
@@ -160,7 +142,7 @@ function CarteirasContent() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 6 }}>
             {tabBtn('todas', 'Todas')}
-            {carteirasDisponiveis.map(c => tabBtn(c, GERENTES[c] ?? c))}
+            {gerentes.map(g => tabBtn(g, g))}
           </div>
 
           <div style={{ position: 'relative', marginLeft: 'auto' }}>
@@ -192,8 +174,8 @@ function CarteirasContent() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  {['#', 'Cliente', 'Email', 'Telefone', 'Gerente', 'Fat. Base', 'TPV Mês', 'Última Venda'].map(h => (
-                    <th key={h} style={{ padding: '10px 12px', textAlign: h === '#' || h === 'Fat. Base' || h === 'TPV Mês' ? 'right' : 'left',
+                  {['Cliente', 'Email', 'Telefone', 'Gerente', 'Fat. Base', 'TPV Mês', 'Última Venda'].map(h => (
+                    <th key={h} style={{ padding: '10px 12px', textAlign: h === 'Fat. Base' || h === 'TPV Mês' ? 'right' : 'left',
                       fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -201,13 +183,12 @@ function CarteirasContent() {
               <tbody>
                 {filtered.map((c, i) => (
                   <tr key={c.email + i} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'var(--bg-card2)' }}>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', color: 'var(--text2)', fontWeight: 700, fontSize: 12 }}>{c.ranking}</td>
                     <td style={{ padding: '10px 12px', fontWeight: 600, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.nome}</td>
                     <td style={{ padding: '10px 12px', color: 'var(--text2)', fontSize: 12 }}>{c.email}</td>
                     <td style={{ padding: '10px 12px', color: 'var(--text2)', fontSize: 12, whiteSpace: 'nowrap' }}>{c.telefone || '—'}</td>
                     <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                       <span style={{ background: 'var(--bg-card2)', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
-                        {GERENTES[c.carteira] ?? c.carteira}
+                        {c.gerente}
                       </span>
                     </td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{BRL(c.faturamento)}</td>
