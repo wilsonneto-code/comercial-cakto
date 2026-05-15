@@ -124,11 +124,13 @@ function GCContent() {
   const [activations, setActs]    = useState<DbActivation[]>([])
   const [meetings, setMeetings]   = useState<Meeting[]>([])
   const [tpvMap, setTpvMap]       = useState<Record<string, { tpv_mes: number; ultima_venda: string | null }>>({})
+  const [tpvLoaded, setTpvLoaded] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving]   = useState(false)
 
-  // Filtros funil
+  // Filtros
   const [filterGerente, setFilterGerente] = useState('')
+  const [filterMonth,   setFilterMonth]   = useState(() => today.toISOString().slice(0, 7))
 
   // Calendário
   const [year, setYear]   = useState(today.getFullYear())
@@ -202,7 +204,10 @@ function GCContent() {
       if (emails.length > 0) {
         supabase.functions.invoke('mb-search', { body: { emails } }).then(({ data }) => {
           if (data?.tpv) setTpvMap(data.tpv)
-        })
+          setTpvLoaded(true)
+        }).catch(() => setTpvLoaded(true))
+      } else {
+        setTpvLoaded(true)
       }
 
       setMeetings(((mtgs || []) as any[]).map(m => ({
@@ -226,8 +231,10 @@ function GCContent() {
     return activations.filter(a => {
       if (hasAnyRole(user, ['Admin'])) return true
       return a.gerente_id === user?.id
-    }).filter(a => !filterGerente || a.gerente_id === filterGerente)
-  }, [activations, user, filterGerente])
+    })
+    .filter(a => !filterGerente || a.gerente_id === filterGerente)
+    .filter(a => !filterMonth  || a.date?.slice(0, 7) === filterMonth)
+  }, [activations, user, filterGerente, filterMonth])
 
   const starterList    = visibleActs.filter(a => funil(a.faturamento_mensal) === 'Starter')
   const growthList     = visibleActs.filter(a => funil(a.faturamento_mensal) === 'Growth')
@@ -474,18 +481,26 @@ function GCContent() {
             </div>
             {/* TPV do mês */}
             {(() => {
-              const tpv = tpvMap[a.email?.toLowerCase()]
-              if (!tpv) return null
-              return (
+              const emailKey = a.email?.toLowerCase()
+              const tpv = emailKey ? tpvMap[emailKey] : undefined
+              if (!tpvLoaded) return (
                 <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6,
-                  background: tpv.tpv_mes > 0 ? '#34C75915' : '#FF3B3010',
-                  border: `1px solid ${tpv.tpv_mes > 0 ? '#34C75940' : '#FF3B3030'}`,
+                  background: 'var(--bg-card2)', border: '1px solid var(--border)',
                   borderRadius: 6, padding: '4px 8px' }}>
                   <span style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em' }}>TPV mês</span>
-                  <span style={{ fontSize: 12, fontWeight: 800, color: tpv.tpv_mes > 0 ? '#34C759' : '#FF3B30' }}>
-                    {BRL(tpv.tpv_mes)}
+                  <span style={{ fontSize: 11, color: 'var(--text2)' }}>…</span>
+                </div>
+              )
+              return (
+                <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6,
+                  background: tpv && tpv.tpv_mes > 0 ? '#34C75915' : 'var(--bg-card2)',
+                  border: `1px solid ${tpv && tpv.tpv_mes > 0 ? '#34C75940' : 'var(--border)'}`,
+                  borderRadius: 6, padding: '4px 8px' }}>
+                  <span style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em' }}>TPV mês</span>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: tpv && tpv.tpv_mes > 0 ? '#34C759' : 'var(--text2)' }}>
+                    {tpv ? BRL(tpv.tpv_mes) : 'R$0'}
                   </span>
-                  {tpv.ultima_venda && (
+                  {tpv?.ultima_venda && (
                     <span style={{ fontSize: 10, color: 'var(--text2)', marginLeft: 2 }}>
                       · {new Date(tpv.ultima_venda).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
                     </span>
@@ -559,6 +574,23 @@ function GCContent() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
           <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-.02em' }}>Gerente de Contas</h1>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {/* Filtro de mês */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                type="month"
+                value={filterMonth}
+                onChange={e => setFilterMonth(e.target.value)}
+                className="inp"
+                style={{ fontSize: 13, padding: '6px 10px', width: 148 }}
+              />
+              {filterMonth && (
+                <button onClick={() => setFilterMonth('')}
+                  title="Ver todos os meses"
+                  style={{ fontSize: 11, padding: '5px 9px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card2)', cursor: 'pointer', color: 'var(--text2)', fontFamily: 'inherit' }}>
+                  Todos
+                </button>
+              )}
+            </div>
             {hasAnyRole(user, ['Admin']) && (
               <Sel value={filterGerente} onChange={setFilterGerente}
                 options={gerentes.map(g => ({ value: g.id, label: g.name }))}
@@ -650,6 +682,36 @@ function GCContent() {
                               {gerente && <span style={{ color: 'var(--action)' }}>GC: <b>{gerente.split(' ')[0]}</b></span>}
                               {a.faturamento_mensal != null && <span style={{ color: fColor, fontWeight: 700 }}>{BRL(a.faturamento_mensal)}/mês</span>}
                             </div>
+
+                            {/* TPV do mês */}
+                            {(() => {
+                              const emailKey = a.email?.toLowerCase()
+                              const tpv = emailKey ? tpvMap[emailKey] : undefined
+                              if (!tpvLoaded) return (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8,
+                                  background: 'var(--bg-card2)', border: '1px solid var(--border)',
+                                  borderRadius: 6, padding: '4px 8px' }}>
+                                  <span style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em' }}>TPV mês</span>
+                                  <span style={{ fontSize: 11, color: 'var(--text2)' }}>…</span>
+                                </div>
+                              )
+                              return (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8,
+                                  background: tpv && tpv.tpv_mes > 0 ? '#34C75915' : 'var(--bg-card2)',
+                                  border: `1px solid ${tpv && tpv.tpv_mes > 0 ? '#34C75940' : 'var(--border)'}`,
+                                  borderRadius: 6, padding: '4px 8px' }}>
+                                  <span style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em' }}>TPV mês</span>
+                                  <span style={{ fontSize: 12, fontWeight: 800, color: tpv && tpv.tpv_mes > 0 ? '#34C759' : 'var(--text2)' }}>
+                                    {tpv ? BRL(tpv.tpv_mes) : 'R$0'}
+                                  </span>
+                                  {tpv?.ultima_venda && (
+                                    <span style={{ fontSize: 10, color: 'var(--text2)', marginLeft: 2 }}>
+                                      · {new Date(tpv.ultima_venda).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                                    </span>
+                                  )}
+                                </div>
+                              )
+                            })()}
 
                             {/* Reuniões */}
                             {clientMeetings.length > 0 && (
