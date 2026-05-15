@@ -258,89 +258,163 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
             </div>
           </div>
 
-          {dailyTpv.every(d => d.value === 0) ? (
-            <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text2)', fontSize: 13 }}>
-              Sem faturamento registrado neste mês
-            </div>
-          ) : (
-            <>
-              {/* Barras de valor diário */}
-              <div style={{ position: 'relative' }}
-                onMouseLeave={() => setHoveredBar(null)}>
+          {(() => {
+            const [y, m]      = mes.split('-').map(Number)
+            const daysInMonth = new Date(y, m, 0).getDate()
+            const dailyTarget = prevTotal > 0 ? prevTotal / daysInMonth : 0
+            const maxVal      = Math.max(...dailyTpv.map(x => x.value), dailyTarget, 1)
+            const maxAcum     = Math.max(prevTotal, dailyTpv[dailyTpv.length - 1]?.acumulado ?? 0, 1)
+            const BAR_H       = 110
+            const LINE_H      = 90
+            const W = 400, PAD = { top: 12, bottom: 24, left: 8, right: 8 }
+            const chartW = W - PAD.left - PAD.right
+            const chartH = LINE_H - PAD.top - PAD.bottom
 
-                {/* Tooltip — sempre no topo, x acompanha a barra */}
-                {hoveredBar !== null && dailyTpv[hoveredBar.idx] && (() => {
-                  const d = dailyTpv[hoveredBar.idx]
-                  const pct = hoveredBar.idx / (dailyTpv.length - 1)
-                  const leftPct = Math.min(Math.max(pct * 100, 5), 80)
-                  return (
-                    <div style={{
-                      position: 'absolute', top: 0, left: `${leftPct}%`,
-                      transform: 'translateY(-105%)',
-                      background: '#1e293b', border: '1px solid var(--border)', borderRadius: 10,
-                      padding: '10px 14px', zIndex: 100, pointerEvents: 'none', minWidth: 148,
-                      boxShadow: '0 8px 24px rgba(0,0,0,.6)',
-                    }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', marginBottom: 6 }}>{d.label}</div>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: d.value > 0 ? COR.verde : 'var(--text2)' }}>{BRL(d.value)}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>
-                        Acumulado: <span style={{ fontWeight: 700, color: COR.azul }}>{BRL(d.acumulado)}</span>
-                      </div>
-                    </div>
-                  )
-                })()}
+            // Pontos da linha acumulada real
+            const realPts = dailyTpv.map((d, i) => ({
+              x: PAD.left + (i / (dailyTpv.length - 1 || 1)) * chartW,
+              y: PAD.top + chartH - Math.min((d.acumulado / maxAcum) * chartH, chartH),
+            }))
+            // Pontos da linha de meta acumulada (prev / dias * dia)
+            const metaPts = dailyTpv.map((d, i) => ({
+              x: PAD.left + (i / (dailyTpv.length - 1 || 1)) * chartW,
+              y: PAD.top + chartH - Math.min(((dailyTarget * (i + 1)) / maxAcum) * chartH, chartH),
+            }))
+            const realPath = realPts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ')
+            const metaPath = metaPts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ')
+            const areaPath = realPts.length
+              ? `${realPath} L${realPts[realPts.length-1].x},${PAD.top+chartH} L${realPts[0].x},${PAD.top+chartH} Z`
+              : ''
+            const targetBarH = dailyTarget > 0 ? Math.min(BAR_H - 10, (dailyTarget / maxVal) * (BAR_H - 10)) : 0
 
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 100, marginBottom: 4, padding: '0 4px' }}>
-                  {dailyTpv.map((d, i) => {
-                    const maxVal = Math.max(...dailyTpv.map(x => x.value), 1)
-                    const h = d.value > 0 ? Math.max(4, (d.value / maxVal) * 90) : 2
-                    const isHoje = d.label === new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
-                    const isHovered = hoveredBar?.idx === i
+            return dailyTpv.every(d => d.value === 0) ? (
+              <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text2)', fontSize: 13 }}>
+                Sem faturamento registrado neste mês
+              </div>
+            ) : (
+              <>
+                {/* Barras + linha de meta diária */}
+                <div style={{ position: 'relative' }} onMouseLeave={() => setHoveredBar(null)}>
+
+                  {/* Tooltip */}
+                  {hoveredBar !== null && dailyTpv[hoveredBar.idx] && (() => {
+                    const d = dailyTpv[hoveredBar.idx]
+                    const pct = hoveredBar.idx / (dailyTpv.length - 1)
+                    const leftPct = Math.min(Math.max(pct * 100, 5), 78)
+                    const metaAcum = dailyTarget * (hoveredBar.idx + 1)
+                    const diff = d.acumulado - metaAcum
                     return (
-                      <div key={i}
-                        onMouseEnter={() => setHoveredBar({ idx: i, x: 0, y: 0 })}
-                        style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', cursor: 'crosshair', height: 100 }}>
-                        <div style={{
-                          width: isHovered ? '90%' : '75%', height: h,
-                          background: isHovered
-                            ? '#fff'
-                            : isHoje
-                              ? COR.verde
-                              : d.value > 0
-                                ? `color-mix(in srgb, ${COR.verde} 70%, ${COR.azul})`
-                                : 'var(--border)',
-                          borderRadius: '3px 3px 0 0',
-                          opacity: d.value === 0 ? 0.2 : 1,
-                          transition: 'width .1s, background .1s',
-                        }} />
+                      <div style={{
+                        position: 'absolute', top: 0, left: `${leftPct}%`,
+                        transform: 'translateY(-105%)',
+                        background: '#1e293b', border: '1px solid var(--border)', borderRadius: 10,
+                        padding: '10px 14px', zIndex: 100, pointerEvents: 'none', minWidth: 168,
+                        boxShadow: '0 8px 24px rgba(0,0,0,.6)',
+                      }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', marginBottom: 6 }}>{d.label}</div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: d.value > 0 ? COR.verde : 'var(--text2)' }}>{BRL(d.value)}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>
+                          Meta dia: <span style={{ fontWeight: 700, color: COR.amarelo }}>{BRL(dailyTarget)}</span>
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>
+                          Acumulado: <span style={{ fontWeight: 700, color: COR.azul }}>{BRL(d.acumulado)}</span>
+                        </div>
+                        {prevTotal > 0 && (
+                          <div style={{ fontSize: 11, marginTop: 2, fontWeight: 700, color: diff >= 0 ? COR.verde : COR.vermelho }}>
+                            {diff >= 0 ? `+${BRL(diff)} acima` : `${BRL(Math.abs(diff))} abaixo`} da meta
+                          </div>
+                        )}
                       </div>
                     )
-                  })}
-                </div>
-              </div>
+                  })()}
 
-              {/* Linha acumulado */}
-              <LineAreaChart
-                data={dailyTpv}
-                height={80}
-                color={COR.azul}
-                valueKey="acumulado"
-                labelKey="label"
-              />
+                  {/* Linha de meta diária nas barras */}
+                  {targetBarH > 0 && (
+                    <div style={{
+                      position: 'absolute', left: 4, right: 4,
+                      bottom: targetBarH,
+                      height: 0,
+                      borderTop: `2px dashed ${COR.amarelo}`,
+                      opacity: 0.8,
+                      pointerEvents: 'none',
+                      zIndex: 2,
+                    }}>
+                      <span style={{
+                        position: 'absolute', right: 0, top: -18,
+                        fontSize: 9, fontWeight: 700, color: COR.amarelo,
+                        background: '#1e293b', padding: '1px 5px', borderRadius: 4,
+                      }}>{BRL(dailyTarget)}/dia</span>
+                    </div>
+                  )}
 
-              {/* Legenda */}
-              <div style={{ display: 'flex', gap: 16, marginTop: 6 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text2)' }}>
-                  <span style={{ width: 10, height: 10, background: COR.verde, borderRadius: 2, display: 'inline-block' }} />
-                  Faturamento diário
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: BAR_H, marginBottom: 4, padding: '0 4px' }}>
+                    {dailyTpv.map((d, i) => {
+                      const h = d.value > 0 ? Math.max(4, (d.value / maxVal) * (BAR_H - 10)) : 2
+                      const isHoje   = d.label === new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+                      const isHovered = hoveredBar?.idx === i
+                      const aboveMeta = d.value >= dailyTarget && dailyTarget > 0
+                      return (
+                        <div key={i} onMouseEnter={() => setHoveredBar({ idx: i, x: 0, y: 0 })}
+                          style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', cursor: 'crosshair', height: BAR_H }}>
+                          <div style={{
+                            width: isHovered ? '92%' : '78%', height: h,
+                            background: isHovered ? '#fff'
+                              : aboveMeta ? COR.verde
+                              : isHoje    ? COR.amarelo
+                              : d.value > 0 ? `color-mix(in srgb, ${COR.vermelho} 60%, ${COR.amarelo})`
+                              : 'var(--border)',
+                            borderRadius: '3px 3px 0 0',
+                            opacity: d.value === 0 ? 0.2 : 1,
+                            transition: 'width .1s, background .1s',
+                          }} />
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text2)' }}>
-                  <span style={{ width: 12, height: 3, background: COR.azul, borderRadius: 2, display: 'inline-block' }} />
-                  Acumulado do mês
+
+                {/* Gráfico acumulado vs meta acumulada */}
+                <svg viewBox={`0 0 ${W} ${LINE_H}`} style={{ width: '100%', height: LINE_H }} preserveAspectRatio="none">
+                  <defs>
+                    <linearGradient id="gcRealGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={COR.azul} stopOpacity="0.35" />
+                      <stop offset="100%" stopColor={COR.azul} stopOpacity="0" />
+                    </linearGradient>
+                  </defs>
+                  {areaPath && <path d={areaPath} fill="url(#gcRealGrad)" />}
+                  {realPath && <path d={realPath} fill="none" stroke={COR.azul} strokeWidth="2" style={{ filter: `drop-shadow(0 0 5px ${COR.azul}88)` }} />}
+                  {metaPath && <path d={metaPath} fill="none" stroke={COR.amarelo} strokeWidth="1.5" strokeDasharray="5 4" opacity="0.85" />}
+                  {realPts.map((p, i) => (
+                    <circle key={i} cx={p.x} cy={p.y} r={2.5} fill={COR.azul} stroke="var(--bg-card)" strokeWidth={1.5} />
+                  ))}
+                  {/* Labels eixo x */}
+                  {dailyTpv.map((d, i) => i % Math.ceil(dailyTpv.length / 6) === 0 && (
+                    <text key={i} x={realPts[i].x} y={LINE_H - 6} textAnchor="middle" fontSize={9} fill="var(--text2)">{d.label}</text>
+                  ))}
+                </svg>
+
+                {/* Legenda */}
+                <div style={{ display: 'flex', gap: 16, marginTop: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text2)' }}>
+                    <span style={{ width: 10, height: 10, background: COR.verde, borderRadius: 2, display: 'inline-block' }} />
+                    Acima da meta
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text2)' }}>
+                    <span style={{ width: 10, height: 10, background: `color-mix(in srgb, ${COR.vermelho} 60%, ${COR.amarelo})`, borderRadius: 2, display: 'inline-block' }} />
+                    Abaixo da meta
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text2)' }}>
+                    <span style={{ width: 12, height: 3, background: COR.azul, borderRadius: 2, display: 'inline-block' }} />
+                    Acumulado real
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text2)' }}>
+                    <span style={{ width: 14, height: 0, borderTop: `2px dashed ${COR.amarelo}`, display: 'inline-block' }} />
+                    Meta acumulada
+                  </div>
                 </div>
-              </div>
-            </>
-          )}
+              </>
+            )
+          })()}
         </div>
 
         {/* Linha 1: Donuts + Motivos */}
