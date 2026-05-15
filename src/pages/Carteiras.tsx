@@ -3,7 +3,7 @@ import { Header } from '../../components/Header'
 import { useAuth, hasAnyRole } from '@/lib/authContext'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase/client'
-import { RefreshCw, Search, TrendingUp, DollarSign, MessageSquare } from 'lucide-react'
+import { RefreshCw, Search, TrendingUp, DollarSign, MessageSquare, Zap, Tag, CheckCircle, X } from 'lucide-react'
 import { useToast } from '../../components/ui/Toast'
 
 interface Nota {
@@ -71,6 +71,13 @@ function CarteirasContent() {
   const [notaForm, setNotaForm]       = useState<Omit<Nota,'email'>>({ motivo: '', observacao: '', proxima_acao: '', data_contato: '' })
   const [isSaving, setIsSaving]       = useState(false)
 
+  // Campanha DataCrazy
+  const [modalCampanha, setModalCampanha] = useState(false)
+  const [dcTags, setDcTags]               = useState<{ id: string; name: string; color: string }[]>([])
+  const [tagSelecionada, setTagSelecionada] = useState('')
+  const [isCampanha, setIsCampanha]       = useState(false)
+  const [resultCampanha, setResultCampanha] = useState<any>(null)
+
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
@@ -123,6 +130,31 @@ function CarteirasContent() {
     setNotas(p => ({ ...p, [modalCli.email]: { ...payload, id: notas[modalCli.email]?.id } as Nota }))
     toast('Nota salva!', 'success')
     setModalCli(null)
+  }
+
+  async function abrirModalCampanha() {
+    setResultCampanha(null)
+    setTagSelecionada('')
+    // Carrega tags do DataCrazy
+    const { data } = await supabase.functions.invoke('campanha-gc', {
+      body: { listar_tags: true }
+    })
+    if (data?.tags) setDcTags(data.tags)
+    setModalCampanha(true)
+  }
+
+  async function enviarCampanha() {
+    if (!tagSelecionada) { toast('Selecione uma tag', 'error'); return }
+    const emails = filtered.map(c => c.email).filter(Boolean)
+    if (!emails.length) { toast('Nenhum cliente na lista', 'error'); return }
+    setIsCampanha(true)
+    const tag = dcTags.find(t => t.id === tagSelecionada)
+    const { data, error } = await supabase.functions.invoke('campanha-gc', {
+      body: { emails, tagId: tagSelecionada, tagName: tag?.name }
+    })
+    setIsCampanha(false)
+    if (error) { toast('Erro ao enviar campanha', 'error'); return }
+    setResultCampanha(data)
   }
 
   const gerentes = [...new Set(clientes.map(c => c.gerente))].sort()
@@ -294,6 +326,20 @@ function CarteirasContent() {
               <option value="tpv">↓ TPV mês</option>
               <option value="nome">A→Z Nome</option>
             </select>
+
+            {/* Botão campanha */}
+            {!isLoading && filtered.length > 0 && (
+              <button onClick={abrirModalCampanha} style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '8px 14px', borderRadius: 8, border: 'none',
+                background: 'linear-gradient(135deg, #FF6B35, #FF3B30)',
+                color: '#fff', cursor: 'pointer', fontFamily: 'inherit',
+                fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap',
+              }}>
+                <Zap size={13} />
+                Criar Campanha ({filtered.length})
+              </button>
+            )}
           </div>
         </div>
 
@@ -384,6 +430,95 @@ function CarteirasContent() {
           </div>
         )}
       </div>
+
+      {/* Modal de campanha DataCrazy */}
+      {modalCampanha && (
+        <div style={{ position: 'fixed', inset: 0, background: '#0009', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+          onClick={e => { if (e.target === e.currentTarget && !isCampanha) { setModalCampanha(false); setResultCampanha(null) } }}>
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, padding: 28, width: '100%', maxWidth: 520 }}>
+
+            {!resultCampanha ? (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg,#FF6B35,#FF3B30)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Zap size={18} color="#fff" />
+                  </div>
+                  <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800 }}>Criar Campanha no DataCrazy</h2>
+                </div>
+                <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--text2)' }}>
+                  Será adicionada uma tag a <strong>{filtered.length} clientes</strong> filtrados. O flow configurado no DataCrazy para essa tag será disparado automaticamente.
+                </p>
+
+                <div style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: '12px 14px', marginBottom: 16, fontSize: 12, color: 'var(--text2)' }}>
+                  <strong style={{ color: 'var(--text)' }}>Clientes selecionados:</strong>{' '}
+                  {filtered.slice(0, 3).map(c => c.nome.split(' ')[0]).join(', ')}{filtered.length > 3 ? ` e mais ${filtered.length - 3}…` : ''}
+                </div>
+
+                <div style={{ marginBottom: 20 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 8 }}>
+                    Tag DataCrazy (flow pré-configurado)
+                  </label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 200, overflowY: 'auto' }}>
+                    {dcTags.length === 0 && <div style={{ color: 'var(--text2)', fontSize: 13 }}>Carregando tags...</div>}
+                    {dcTags.map(t => (
+                      <label key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 8,
+                        background: tagSelecionada === t.id ? t.color + '22' : 'var(--bg-card2)',
+                        border: `1px solid ${tagSelecionada === t.id ? t.color : 'transparent'}`,
+                        cursor: 'pointer', transition: 'all .15s' }}>
+                        <input type="radio" name="tag" value={t.id} checked={tagSelecionada === t.id}
+                          onChange={() => setTagSelecionada(t.id)} style={{ accentColor: t.color }} />
+                        <span style={{ width: 10, height: 10, borderRadius: '50%', background: t.color, flexShrink: 0 }} />
+                        <span style={{ fontSize: 13, fontWeight: 600 }}>{t.name}</span>
+                        <Tag size={11} color="var(--text2)" style={{ marginLeft: 'auto' }} />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                  <button onClick={() => setModalCampanha(false)} style={{ padding: '9px 20px', borderRadius: 8, border: '1px solid var(--border)', background: 'none', color: 'var(--text2)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600 }}>
+                    Cancelar
+                  </button>
+                  <button onClick={enviarCampanha} disabled={isCampanha || !tagSelecionada} style={{
+                    padding: '9px 24px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                    background: tagSelecionada ? 'linear-gradient(135deg,#FF6B35,#FF3B30)' : 'var(--bg-card2)',
+                    color: tagSelecionada ? '#fff' : 'var(--text2)', fontFamily: 'inherit', fontSize: 13, fontWeight: 700,
+                  }}>
+                    {isCampanha ? `Enviando... (0/${filtered.length})` : `Disparar Campanha`}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ textAlign: 'center', padding: '8px 0 20px' }}>
+                  <CheckCircle size={40} color="#34C759" style={{ marginBottom: 10 }} />
+                  <h2 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 800 }}>Campanha Enviada!</h2>
+                  <p style={{ margin: 0, fontSize: 13, color: 'var(--text2)' }}>Tag <strong>"{resultCampanha.tagName}"</strong> adicionada no DataCrazy</p>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
+                  {[
+                    { label: 'Tag adicionada', val: resultCampanha.sucesso, color: '#34C759' },
+                    { label: 'Não encontrado', val: resultCampanha.nao_encontrado, color: '#FF9F0A' },
+                    { label: 'Erro', val: resultCampanha.erro, color: '#FF3B30' },
+                  ].map(({ label, val, color }) => (
+                    <div key={label} style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: '12px 14px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 24, fontWeight: 800, color }}>{val}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>{label}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ background: '#34C75910', border: '1px solid #34C75930', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: 'var(--text2)', marginBottom: 16 }}>
+                  O flow configurado no DataCrazy para a tag <strong style={{ color: 'var(--text)' }}>"{resultCampanha.tagName}"</strong> será disparado automaticamente para os leads marcados.
+                </div>
+                <button onClick={() => { setModalCampanha(false); setResultCampanha(null) }}
+                  style={{ width: '100%', padding: '10px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 700 }}>
+                  Fechar
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Modal de nota */}
       {modalCli && (
