@@ -222,6 +222,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
     if (!form.phone || form.phone === '+55 ') missing.push('Telefone')
     if (!form.faturamento_mensal) missing.push('Faturamento Mensal')
     if (!form.notes)             missing.push('Notas')
+    if (form.images.length === 0) missing.push('Arquivos / Imagens')
     if (sdrOptions.length > 0 && !form.sdr_id) missing.push('SDR Responsável')
     if (missing.length > 0) {
       toast(`Campos obrigatórios: ${missing.join(', ')}`, 'error'); return
@@ -470,7 +471,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
           placeholder="Observações sobre o cliente, contrato, produto…"
           style={{ resize: 'vertical', fontSize: 13 }} />
       </Field>
-      <Field label="Arquivos / Imagens">
+      <Field label="Arquivos / Imagens" required>
         <label style={{
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           gap: 6, padding: '16px 12px', border: '2px dashed var(--border)', borderRadius: 10,
@@ -591,7 +592,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
           style={{ resize: 'vertical', fontSize: 13 }} />
       </Field>
 
-      <Field label="Arquivos / Imagens">
+      <Field label="Arquivos / Imagens" required>
         <label style={{
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           gap: 6, padding: '16px 12px', border: '2px dashed var(--border)', borderRadius: 10,
