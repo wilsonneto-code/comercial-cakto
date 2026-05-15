@@ -66,6 +66,22 @@ serve(async (req) => {
     return json({ daily })
   }
 
+  // ── Modo: buscar user_id por email em qualquer banco ────────────────────
+  if (body.get_user_id && body.debug_email) {
+    const dbId  = Number(body.db_id)
+    const email = body.debug_email.toLowerCase().replace(/'/g, "''")
+    const res   = await fetch(`${MB_URL}/api/dataset`, {
+      method: 'POST',
+      headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ database: dbId, type: 'native', native: {
+        query: `SELECT id FROM "public"."user_user" WHERE LOWER(email) = '${email}' LIMIT 1`
+      }}),
+    })
+    const data = await res.json()
+    const userId = data?.data?.rows?.[0]?.[0] ?? null
+    return json({ db_id: dbId, user_id: userId })
+  }
+
   // ── Modo: listar bancos disponíveis no Metabase ─────────────────────────
   if (body.list_databases) {
     const res = await fetch(`${MB_URL}/api/database`, {

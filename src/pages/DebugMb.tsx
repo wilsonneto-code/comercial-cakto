@@ -54,8 +54,16 @@ export default function DebugMb() {
     setResults(res)
     if (deepData.data?.report) setDeepRes(deepData.data.report)
 
-    const splitResult = res[3]
-    const userId3 = splitResult?.rows?.[0]?.[0]
+    // Busca user_id em cada banco diretamente via user_user (sem depender de payment_payment)
+    const [uid3Res, uid4Res] = await Promise.all([
+      supabase.functions.invoke('mb-search', { body: { get_user_id: true, debug_email: email.trim().toLowerCase(), db_id: 3 } }),
+      supabase.functions.invoke('mb-search', { body: { get_user_id: true, debug_email: email.trim().toLowerCase(), db_id: 4 } }),
+    ])
+
+    const userId3 = uid3Res.data?.user_id
+    const userId4 = uid4Res.data?.user_id
+
+    // Status de todos os pagamentos no Split #3
     if (userId3) {
       const statusData = await supabase.functions.invoke('mb-search', {
         body: { all_statuses: true, user_id: userId3, db_id: 3 },
@@ -63,14 +71,14 @@ export default function DebugMb() {
       setStatusRes({ userId: userId3, data: statusData.data })
     }
 
-    // Busca user_id no banco Cakto #4 e testa tabelas de pagamento
-    const caktoResult = res[4]
-    const userId4 = caktoResult?.rows?.[0]?.[0]
+    // Pagamentos no Cakto #4 com user_id correto
     if (userId4) {
       const payData = await supabase.functions.invoke('mb-search', {
         body: { explore_payments_cakto: true, user_id: userId4, db_id: 4 },
       })
       setCaktoPayRes({ userId: userId4, data: payData.data })
+    } else {
+      setCaktoPayRes({ userId: 'não encontrado', data: { results: [] } })
     }
     setIsLoading(false)
   }
