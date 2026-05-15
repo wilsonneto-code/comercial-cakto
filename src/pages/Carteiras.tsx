@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Header } from '../../components/Header'
-import { useAuth } from '@/lib/authContext'
+import { useAuth, hasAnyRole } from '@/lib/authContext'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase/client'
 import { RefreshCw, Search, TrendingUp, DollarSign, MessageSquare } from 'lucide-react'
@@ -56,6 +56,9 @@ const MOTIVOS = [
 function CarteirasContent() {
   const { user } = useAuth()
   const toast    = useToast()
+  const isAdmin  = hasAnyRole(user, ['Admin'])
+  // GC só vê a própria carteira (nome do user === nome do gerente no Metabase)
+  const gcNome   = !isAdmin ? (user?.name ?? '') : null
   const [clientes, setClientes]       = useState<CarteiraCli[]>([])
   const [notas, setNotas]             = useState<Record<string, Nota>>({})
   const [isLoading, setIsLoading]     = useState(true)
@@ -131,7 +134,7 @@ function CarteirasContent() {
     pct === null ? null : pct >= 80 ? 'verde' : pct >= 50 ? 'amarelo' : 'vermelho'
 
   const filtered = clientes
-    .filter(c => filterCart === 'todas' || c.gerente === filterCart)
+    .filter(c => gcNome ? c.gerente === gcNome : (filterCart === 'todas' || c.gerente === filterCart))
     .filter(c => {
       if (filterPct !== 'todos') return getPctColor(getPct(c)) === filterPct
       return true
@@ -191,9 +194,11 @@ function CarteirasContent() {
         {/* Título */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
           <div>
-            <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>Carteiras</h1>
+            <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>
+              {gcNome ? `Minha Carteira` : 'Carteiras'}
+            </h1>
             <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text2)' }}>
-              {clientes.length} clientes ativos · dados do Metabase
+              {gcNome ? `${gcNome} · ` : ''}{filtered.length} clientes · dados do Metabase
             </p>
           </div>
           <button onClick={refresh} disabled={isRefreshing} style={{
@@ -206,13 +211,13 @@ function CarteirasContent() {
 
         {/* Cards GC */}
         {!isLoading && (
-          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${resumo.length}, 1fr)`, gap: 14, marginBottom: 24 }}>
-            {resumo.map(r => {
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${gcNome ? 1 : resumo.length}, 1fr)`, gap: 14, marginBottom: 24 }}>
+            {resumo.filter(r => gcNome ? r.gerente === gcNome : true).map(r => {
               const pct = r.prev_total > 0 ? r.tpv_total / r.prev_total * 100 : null
               const [pbg, pfg] = !pct ? ['transparent','var(--text2)'] : pct >= 80 ? ['#34C75918','#34C759'] : pct >= 50 ? ['#FF9F0A18','#FF9F0A'] : ['#FF3B3018','#FF3B30']
               const active = filterCart === r.gerente
               return (
-                <div key={r.gerente} onClick={() => setFilterCart(active ? 'todas' : r.gerente)}
+                <div key={r.gerente} onClick={() => !gcNome && setFilterCart(active ? 'todas' : r.gerente)}
                   style={{ background: 'var(--bg-card)', border: `1.5px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
                     borderRadius: 14, padding: '18px 20px', cursor: 'pointer', transition: 'border .15s' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
@@ -245,19 +250,22 @@ function CarteirasContent() {
 
         {/* Barra de filtros */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-          {/* Gerente */}
-          <div style={{ display: 'flex', gap: 6 }}>
-            {['todas', ...gerentes].map(g => (
-              <button key={g} onClick={() => setFilterCart(g)} style={{
-                padding: '6px 14px', borderRadius: 20, border: '1px solid var(--border)', cursor: 'pointer',
-                fontFamily: 'inherit', fontSize: 12, fontWeight: 600, transition: 'all .15s',
-                background: filterCart === g ? 'var(--accent)' : 'transparent',
-                color: filterCart === g ? '#fff' : 'var(--text2)',
-              }}>{g === 'todas' ? 'Todos' : g}</button>
-            ))}
-          </div>
-
-          <div style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 4px' }} />
+          {/* Gerente — só admin vê */}
+          {isAdmin && (
+            <>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {['todas', ...gerentes].map(g => (
+                  <button key={g} onClick={() => setFilterCart(g)} style={{
+                    padding: '6px 14px', borderRadius: 20, border: '1px solid var(--border)', cursor: 'pointer',
+                    fontFamily: 'inherit', fontSize: 12, fontWeight: 600, transition: 'all .15s',
+                    background: filterCart === g ? 'var(--accent)' : 'transparent',
+                    color: filterCart === g ? '#fff' : 'var(--text2)',
+                  }}>{g === 'todas' ? 'Todos' : g}</button>
+                ))}
+              </div>
+              <div style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 4px' }} />
+            </>
+          )}
 
           {/* % Atingido */}
           {([
