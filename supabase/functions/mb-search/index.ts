@@ -179,15 +179,26 @@ serve(async (req) => {
 
     const results: any[] = []
 
-    // 1. vendas_por_usuario — parece ser um view/tabela agregada por usuário
-    const vendasSample = await runQ(`SELECT * FROM "public"."vendas_por_usuario" WHERE user_id = ${userId} LIMIT 5`)
-    if (!vendasSample.error && vendasSample.rows.length > 0)
-      results.push({ table: 'vendas_por_usuario', note: 'VIEW de vendas por usuário', ...vendasSample })
-    else {
-      // Tenta sem filtro para ver estrutura
-      const vendasAll = await runQ(`SELECT * FROM "public"."vendas_por_usuario" LIMIT 3`)
-      results.push({ table: 'vendas_por_usuario (sample)', note: `user_id ${userId} não encontrado — amostra`, ...vendasAll })
+    // 1. vendas_por_usuario — tenta vários nomes de campo
+    let vendasFound = false
+    for (const field of ['usuario_id', 'user_id', 'id', 'seller_id', 'coproducer_id']) {
+      const r = await runQ(`SELECT * FROM "public"."vendas_por_usuario" WHERE "${field}" = ${userId} LIMIT 10`)
+      if (!r.error && r.rows.length > 0) {
+        results.push({ table: 'vendas_por_usuario', note: `campo: ${field}`, ...r })
+        vendasFound = true
+        break
+      }
     }
+    if (!vendasFound) {
+      // Mostra estrutura completa da view (todos os campos)
+      const vendasAll = await runQ(`SELECT * FROM "public"."vendas_por_usuario" LIMIT 5`)
+      results.push({ table: 'vendas_por_usuario (estrutura)', note: `user_id ${userId} não encontrado — colunas: ${vendasAll.cols.join(', ')}`, ...vendasAll })
+    }
+
+    // 2. Busca em gateway_order por todos os campos possíveis incluindo coprodução
+    const goAll = await runQ(`SELECT * FROM "public"."gateway_order" WHERE user_id = ${userId} OR affiliate_id = ${userId} OR co_producer_id = ${userId} LIMIT 10`)
+    if (!goAll.error && goAll.rows.length > 0)
+      results.push({ table: 'gateway_order (todos os papéis)', note: 'como comprador, afiliado ou coprodutor', ...goAll })
 
     // 2. gateway_order — orders diretos
     const goSample = await runQ(`SELECT * FROM "public"."gateway_order" LIMIT 1`)
