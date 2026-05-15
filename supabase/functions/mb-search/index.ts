@@ -195,6 +195,33 @@ serve(async (req) => {
     const gsSample2 = await runQ(`SELECT * FROM "public"."gateway_split" LIMIT 1`)
     results.push({ table: 'gateway_split (colunas)', note: `colunas: ${gsSample2.cols.join(', ')}`, cols: gsSample2.cols, rows: gsSample2.rows })
 
+    // 3b. Busca splits dos pedidos dos produtos afiliados dela (PAID no mês atual)
+    const afilSplitCheck = await runQ(`
+      SELECT
+        go.id AS order_id, go.status, go.amount, go.created_at,
+        pa.product_id, pa.commission,
+        gs.id AS split_id, gs.user_id AS split_user_id, gs.percentage, gs.amountreserve, gs.type
+      FROM "public"."product_affiliate" pa
+      JOIN "public"."gateway_order" go ON go."product_id"::text = pa."product_id"::text
+      LEFT JOIN "public"."gateway_split" gs ON gs."order_id"::text = go."id"::text
+      WHERE pa."user_id" = ${userId}
+        AND pa."status" = 'active'
+        AND go."status" = 'paid'
+      ORDER BY go."created_at" DESC
+      LIMIT 10
+    `)
+    results.push({ table: 'affiliate splits (paid orders do mês)', note: 'verifica join gateway_split', ...afilSplitCheck })
+
+    // 3c. Conta quantos pedidos pagos existem para os produtos afiliados dela (todos os períodos)
+    const afilCount = await runQ(`
+      SELECT COUNT(*) as total_orders, SUM(go.amount) as total_amount,
+        MIN(go.created_at) as first_order, MAX(go.created_at) as last_order
+      FROM "public"."product_affiliate" pa
+      JOIN "public"."gateway_order" go ON go."product_id"::text = pa."product_id"::text
+      WHERE pa."user_id" = ${userId} AND pa."status" = 'active' AND go."status" = 'paid'
+    `)
+    results.push({ table: 'total pedidos pagos (afiliados, histórico)', note: 'sem filtro de mês', ...afilCount })
+
     // Tenta buscar split por user_id com vários campos possíveis
     for (const field of ['user_id', 'recipient_id', 'co_producer_id', 'seller_id', 'beneficiary_id']) {
       if (!gsSample2.cols.includes(field)) continue
