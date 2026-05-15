@@ -66,6 +66,41 @@ serve(async (req) => {
     return json({ daily })
   }
 
+  // ── Modo debug: inspecionar pagamentos brutos de um email ───────────────
+  if (body.debug_email) {
+    const email = body.debug_email.toLowerCase().replace(/'/g, "''")
+    // Mostra estatísticas agregadas + últimos pagamentos
+    const sqlStats = `
+      SELECT
+        u."id", u."email",
+        COUNT(p."id") AS total_payments,
+        COUNT(p."id") FILTER (WHERE LOWER(p."status") IN ('paid','approved','completed','pago')) AS paid_count,
+        SUM(p."liquidAmount") FILTER (WHERE LOWER(p."status") IN ('paid','approved','completed','pago')) AS total_liquid,
+        SUM(p."amount") FILTER (WHERE LOWER(p."status") IN ('paid','approved','completed','pago')) AS total_amount,
+        MIN(p."status") AS sample_status,
+        MAX(COALESCE(p."paidAt",p."createdAt")) AS last_date,
+        COUNT(p."paidAt") AS count_with_paidAt,
+        COUNT(p."createdAt") AS count_with_createdAt
+      FROM "public"."user_user" u
+      LEFT JOIN "public"."payment_payment" p ON p."user_id" = u."id"
+      WHERE LOWER(u."email") = '${email}'
+      GROUP BY u."id", u."email"
+    `
+    const sqlSample = `
+      SELECT p."status", p."liquidAmount", p."amount", p."paidAt", p."createdAt"
+      FROM "public"."user_user" u
+      JOIN "public"."payment_payment" p ON p."user_id" = u."id"
+      WHERE LOWER(u."email") = '${email}'
+      ORDER BY COALESCE(p."paidAt",p."createdAt") DESC NULLS LAST
+      LIMIT 10
+    `
+    const [stats, sample] = await Promise.all([
+      runSQL(MB_URL, MB_KEY, sqlStats),
+      runSQL(MB_URL, MB_KEY, sqlSample),
+    ])
+    return json({ stats: { cols: stats.cols, rows: stats.rows }, sample: { cols: sample.cols, rows: sample.rows } })
+  }
+
   // ── Modo: TPV por lista de emails (para GC kanban) ──────────────────────
   if (body.emails && Array.isArray(body.emails)) {
     const emailList = body.emails.map((e: string) => `'${e.replace(/'/g, "''")}'`).join(',')
@@ -74,12 +109,16 @@ serve(async (req) => {
     const sql = `
       SELECT
         u."email",
-        COALESCE(SUM(p."liquidAmount") FILTER (WHERE p."paidAt" >= date_trunc('month', current_date)), 0) AS tpv_mes,
-        COALESCE(MAX(p."paidAt"), NULL) AS ultima_venda
+        COALESCE(SUM(
+          GREATEST(COALESCE(p."liquidAmount", 0), COALESCE(p."amount", 0))
+        ) FILTER (
+          WHERE COALESCE(p."paidAt", p."createdAt") >= date_trunc('month', current_date)
+        ), 0) AS tpv_mes,
+        COALESCE(MAX(COALESCE(p."paidAt", p."createdAt")), NULL) AS ultima_venda
       FROM "public"."user_user" u
       LEFT JOIN "public"."payment_payment" p
         ON p."user_id" = u."id"
-        AND p."status" = 'paid'
+        AND LOWER(p."status") IN ('paid', 'approved', 'completed', 'pago')
       WHERE LOWER(u."email") IN (${emailList.toLowerCase()})
       GROUP BY u."email"
     `
@@ -112,11 +151,13 @@ serve(async (req) => {
       JOIN "public"."user_user" u ON u."id" = p."user_id"
       LEFT JOIN (
         SELECT "user_id",
-          SUM("liquidAmount") FILTER (WHERE "paidAt" >= CURRENT_DATE - INTERVAL '30 days') AS tpv_30d,
-          SUM("liquidAmount") FILTER (WHERE "paidAt" >= date_trunc('month', current_date)) AS tpv_mes,
-          MAX("paidAt") AS ultima_venda
+          SUM(GREATEST(COALESCE("liquidAmount", 0), COALESCE("amount", 0)))
+            FILTER (WHERE COALESCE("paidAt","createdAt") >= CURRENT_DATE - INTERVAL '30 days') AS tpv_30d,
+          SUM(GREATEST(COALESCE("liquidAmount", 0), COALESCE("amount", 0)))
+            FILTER (WHERE COALESCE("paidAt","createdAt") >= date_trunc('month', current_date)) AS tpv_mes,
+          MAX(COALESCE("paidAt","createdAt")) AS ultima_venda
         FROM "public"."payment_payment"
-        WHERE "status" = 'paid'
+        WHERE LOWER("status") IN ('paid', 'approved', 'completed', 'pago')
         GROUP BY "user_id"
       ) pmt ON pmt."user_id" = u."id"
       WHERE p."account_manager_id" IN (${amIds})
