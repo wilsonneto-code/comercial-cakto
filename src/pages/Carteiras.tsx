@@ -66,7 +66,7 @@ function CarteirasContent() {
   const [search, setSearch]           = useState('')
   const [filterCart, setFilterCart]   = useState('todas')
   const [sort, setSort]               = useState<'faturamento' | 'tpv' | 'nome' | 'pct'>('pct')
-  const [filterPct, setFilterPct]     = useState<'todos' | 'verde' | 'amarelo' | 'vermelho'>('todos')
+  const [filterPct, setFilterPct]     = useState<'todos' | 'verde' | 'amarelo' | 'vermelho' | 'critico'>('todos')
   const [modalCli, setModalCli]       = useState<CarteiraCli | null>(null)
   const [notaForm, setNotaForm]       = useState<Omit<Nota,'email'>>({ motivo: '', observacao: '', proxima_acao: '', data_contato: '' })
   const [isSaving, setIsSaving]       = useState(false)
@@ -163,7 +163,7 @@ function CarteirasContent() {
     c.previsao_faturamento > 0 ? (c.tpv_mes ?? 0) / c.previsao_faturamento * 100 : null
 
   const getPctColor = (pct: number | null) =>
-    pct === null ? null : pct >= 80 ? 'verde' : pct >= 50 ? 'amarelo' : 'vermelho'
+    pct === null ? null : pct >= 80 ? 'verde' : pct >= 50 ? 'amarelo' : pct >= 20 ? 'vermelho' : 'critico'
 
   const filtered = clientes
     .filter(c => gcNome ? c.gerente === gcNome : (filterCart === 'todas' || c.gerente === filterCart))
@@ -205,7 +205,7 @@ function CarteirasContent() {
   const pctChip = (pct: number | null) => {
     if (pct === null) return <span style={{ color: 'var(--text2)', fontSize: 12 }}>—</span>
     const v = Math.min(pct, 999)
-    const [bg, fg] = v >= 80 ? ['#34C75922','#34C759'] : v >= 50 ? ['#FF9F0A22','#FF9F0A'] : ['#FF3B3022','#FF3B30']
+    const [bg, fg] = v >= 80 ? ['#34C75922','#34C759'] : v >= 50 ? ['#FF9F0A22','#FF9F0A'] : v >= 20 ? ['#FF3B3022','#FF3B30'] : ['#8B000033','#FF4444']
     return (
       <span style={{ background: bg, color: fg, fontWeight: 700, fontSize: 12, padding: '3px 9px', borderRadius: 20, whiteSpace: 'nowrap' }}>
         {v.toFixed(1)}%
@@ -304,7 +304,8 @@ function CarteirasContent() {
             { v: 'todos',    label: 'Qualquer %',  bg: 'transparent', fg: 'var(--text2)', border: 'var(--border)' },
             { v: 'verde',    label: '≥ 80%',        bg: '#34C759',     fg: '#fff',          border: '#34C759' },
             { v: 'amarelo',  label: '50–79%',       bg: '#FF9F0A',     fg: '#fff',          border: '#FF9F0A' },
-            { v: 'vermelho', label: '< 50%',        bg: '#FF3B30',     fg: '#fff',          border: '#FF3B30' },
+            { v: 'vermelho', label: '20–49%',       bg: '#FF3B30',     fg: '#fff',          border: '#FF3B30' },
+            { v: 'critico',  label: '< 20%',        bg: '#8B0000',     fg: '#fff',          border: '#8B0000' },
           ] as const).map(({ v, label, bg, fg, border }) => (
             <button key={v} onClick={() => setFilterPct(v)} style={{
               padding: '6px 12px', borderRadius: 20, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
