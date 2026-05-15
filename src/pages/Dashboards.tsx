@@ -18,6 +18,7 @@ import { LineAreaChart } from '@/components/ui/charts/LineAreaChart';
 import { DualLineChart } from '@/components/ui/charts/DualLineChart';
 import { supabase } from '@/lib/supabase/client';
 import { DashBuilder } from './DashBuilder';
+import { DashGCContent } from './DashboardGC';
 
 type DashView = 'grid' | 'sdr' | 'gerente' | 'builder';
 type DbUser = { id: string; name: string; role: string; team_id: string | null; active: boolean }
@@ -74,14 +75,14 @@ export default function DashboardsPage() {
 function DashboardsContent() {
   const [view, setView] = useState<DashView>('grid');
   const navigate = useNavigate();
-  if (view === 'sdr')     return <DashSDR     onBack={() => setView('grid')} />;
-  if (view === 'gerente') return <DashGerente onBack={() => setView('grid')} />;
-  if (view === 'builder') return <DashBuilder onBack={() => setView('grid')} />;
+  if (view === 'sdr')     return <DashSDR      onBack={() => setView('grid')} />;
+  if (view === 'gerente') return <DashGCContent onBack={() => setView('grid')} />;
+  if (view === 'builder') return <DashBuilder  onBack={() => setView('grid')} />;
 
   const panelCards = [
     { key: 'builder' as DashView, title: 'Dashboard Builder', desc: 'Crie e configure painéis personalizados com gráficos e métricas.',    icon: LayoutDashboard, color: '#3B82F6',       disabled: false },
     { key: 'sdr'     as DashView, title: 'Dashboard SDR',     desc: 'Produção individual, ranking de ativações e bonificações da equipe.', icon: User,            color: 'var(--action)', disabled: false },
-    { key: 'gerente' as DashView, title: 'Dashboard Gerente', desc: 'Visão geral do time, metas, comissões e churns sob responsabilidade.', icon: TrendingUp,      color: 'var(--purple)', disabled: false },
+    { key: 'gerente' as DashView, title: 'Dashboard Gerente', desc: 'Carteira de clientes, % atingido, motivos, alertas e cobertura de notas.', icon: TrendingUp, color: 'var(--purple)', disabled: false },
     { key: 'grid'    as DashView, title: 'Relatórios',        desc: 'Em breve — relatórios exportáveis, comparativos e histórico.',        icon: BarChart2,       color: 'var(--cyan)',   disabled: true  },
   ] as const;
 

@@ -5,7 +5,8 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase/client'
 import { DonutChart } from '@/components/ui/charts/DonutChart'
 import { BarChartH } from '@/components/ui/charts/BarChartH'
-import { TrendingUp, Users, DollarSign, AlertTriangle, CheckCircle, MessageSquare, RefreshCw } from 'lucide-react'
+import { TrendingUp, Users, DollarSign, AlertTriangle, CheckCircle, MessageSquare, RefreshCw, ChevronLeft } from 'lucide-react'
+import { Button } from '@/components/ui/Button'
 
 interface Cliente {
   gerente: string; nome: string; email: string; telefone: string
@@ -35,7 +36,7 @@ export default function DashboardGC() {
   return <DashGCContent />
 }
 
-function DashGCContent() {
+export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
   const { user } = useAuth()
   const isAdmin = hasAnyRole(user, ['Admin'])
   const gcNome  = !isAdmin ? (user?.name ?? '') : null
@@ -135,9 +136,12 @@ function DashGCContent() {
         {/* Topo */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
           <div>
-            <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>
-              {gcNome ? `Dashboard — ${gcNome}` : 'Dashboard Gerentes de Contas'}
-            </h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              {onBack && <Button variant="ghost" icon={ChevronLeft} onClick={onBack}>Voltar</Button>}
+              <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>
+                {gcNome ? `Dashboard — ${gcNome}` : 'Dashboard Gerente de Contas'}
+              </h1>
+            </div>
             <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text2)' }}>
               {new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })} · {total} clientes na carteira
             </p>
