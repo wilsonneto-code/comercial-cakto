@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase/client'
 import { DonutChart } from '@/components/ui/charts/DonutChart'
 import { BarChartH } from '@/components/ui/charts/BarChartH'
+import { LineAreaChart } from '@/components/ui/charts/LineAreaChart'
 import { TrendingUp, Users, DollarSign, AlertTriangle, CheckCircle, MessageSquare, RefreshCw, ChevronLeft } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { DateRangeFilter } from './DashboardSDR'
@@ -55,27 +56,44 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
   const isAdmin = hasAnyRole(user, ['Admin'])
   const gcNome  = !isAdmin ? (user?.name ?? '') : null
 
-  const [clientes, setClientes]   = useState<Cliente[]>([])
-  const [notas, setNotas]         = useState<Nota[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [isRefresh, setIsRefresh] = useState(false)
-  const [gerente,    setGerente]    = useState('todos')
-  const [preset,     setPreset]     = useState<Preset>('mes')
-  const [customFrom, setCustomFrom] = useState('')
-  const [customTo,   setCustomTo]   = useState('')
+  const [clientes,    setClientes]    = useState<Cliente[]>([])
+  const [notas,       setNotas]       = useState<Nota[]>([])
+  const [growthActs,  setGrowthActs]  = useState<{ date: string; gerente_id: string | null }[]>([])
+  const [gcUsers,     setGcUsers]     = useState<{ id: string; name: string }[]>([])
+  const [isLoading,   setIsLoading]   = useState(true)
+  const [isRefresh,   setIsRefresh]   = useState(false)
+  const [gerente,     setGerente]     = useState('todos')
+  const [preset,      setPreset]      = useState<Preset>('mes')
+  const [customFrom,  setCustomFrom]  = useState('')
+  const [customTo,    setCustomTo]    = useState('')
   const { inicio, fim } = getRangeGC(preset, customFrom, customTo)
 
   useEffect(() => { load() }, [])
+  useEffect(() => { loadGrowth() }, [inicio, fim, gerente, user?.id])
 
   async function load() {
     setIsLoading(true)
-    const [{ data: mb }, { data: nd }] = await Promise.all([
+    const [{ data: mb }, { data: nd }, { data: usrs }] = await Promise.all([
       supabase.functions.invoke('mb-search', { body: {} }),
       supabase.from('carteira_notas').select('*'),
+      supabase.from('users').select('id,name').eq('role', 'Gerente de Contas'),
     ])
     if (mb?.clientes) setClientes(mb.clientes)
-    if (nd) setNotas(nd)
+    if (nd)   setNotas(nd)
+    if (usrs) setGcUsers(usrs as { id: string; name: string }[])
     setIsLoading(false)
+  }
+
+  async function loadGrowth() {
+    let query = supabase.from('activations').select('date,gerente_id').gte('date', inicio).lte('date', fim)
+    if (!isAdmin) {
+      query = query.eq('gerente_id', user?.id ?? '')
+    } else if (gerente !== 'todos') {
+      const gId = gcUsers.find(u => u.name === gerente)?.id
+      if (gId) query = query.eq('gerente_id', gId)
+    }
+    const { data } = await query
+    setGrowthActs((data ?? []) as { date: string; gerente_id: string | null }[])
   }
 
   const refresh = async () => { setIsRefresh(true); await load(); setIsRefresh(false) }
@@ -99,6 +117,25 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
   const amarelos = base.filter(c => { const p = getPct(c); return p !== null && p >= 50 && p < 80 }).length
   const vermelhos= base.filter(c => { const p = getPct(c); return p !== null && p < 50 }).length
   const semPrev  = base.filter(c => !c.previsao_faturamento).length
+
+  // Gráfico crescimento diário da carteira
+  const growthData = (() => {
+    if (!inicio || !fim) return []
+    const start = new Date(inicio + 'T12:00:00')
+    const end   = new Date(fim   + 'T12:00:00')
+    const days: { label: string; date: string; novos: number; acumulado: number }[] = []
+    let acumulado = 0
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0]
+      const novos   = growthActs.filter(a => a.date === dateStr).length
+      acumulado    += novos
+      days.push({
+        label: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+        date: dateStr, novos, acumulado,
+      })
+    }
+    return days
+  })()
 
   // Gráficos
   const donutStatus = [
@@ -203,6 +240,73 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
               <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>{sub}</div>
             </div>
           ))}
+        </div>
+
+        {/* Crescimento diário da carteira */}
+        <div style={{ ...card, padding: '20px', marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                Crescimento da Carteira
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>
+                {growthActs.length} ativações no período · acumulado: {growthData[growthData.length - 1]?.acumulado ?? 0}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 16 }}>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 11, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Novos clientes</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: COR.verde }}>{growthActs.length}</div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 11, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Pico diário</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: COR.azul }}>
+                  {growthData.length > 0 ? Math.max(...growthData.map(d => d.novos)) : 0}
+                </div>
+              </div>
+            </div>
+          </div>
+          {growthData.length <= 1 ? (
+            <div style={{ height: 140, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text2)', fontSize: 13 }}>
+              Selecione um período maior para ver o crescimento diário
+            </div>
+          ) : (
+            <div style={{ position: 'relative' }}>
+              <LineAreaChart
+                data={growthData}
+                height={160}
+                color={COR.verde}
+                valueKey="acumulado"
+                labelKey="label"
+              />
+              {/* Barras de novos por dia sobrepostas */}
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, position: 'absolute', bottom: 28, left: 8, right: 8, height: 60, pointerEvents: 'none' }}>
+                {growthData.map((d, i) => {
+                  const maxNovos = Math.max(...growthData.map(x => x.novos), 1)
+                  const h = d.novos > 0 ? Math.max(4, (d.novos / maxNovos) * 50) : 0
+                  return (
+                    <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end' }}>
+                      {d.novos > 0 && (
+                        <div title={`${d.label}: ${d.novos} novos`}
+                          style={{ width: '70%', height: h, background: `${COR.azul}55`, borderRadius: '3px 3px 0 0', border: `1px solid ${COR.azul}88` }} />
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+          {/* Legenda */}
+          <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text2)' }}>
+              <span style={{ width: 12, height: 3, background: COR.verde, borderRadius: 2, display: 'inline-block' }} />
+              Acumulado
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text2)' }}>
+              <span style={{ width: 12, height: 8, background: `${COR.azul}55`, border: `1px solid ${COR.azul}88`, borderRadius: 2, display: 'inline-block' }} />
+              Novos por dia
+            </div>
+          </div>
         </div>
 
         {/* Linha 1: Donuts + Motivos */}
