@@ -199,36 +199,34 @@ function GCContent() {
       const actsList = (acts || []) as DbActivation[]
       setActs(actsList)
 
-      // Busca TPV do mês para cada cliente via Metabase
-      const emails = actsList.map(a => a.email).filter(Boolean)
-      if (emails.length > 0) {
-        supabase.functions.invoke('mb-search', { body: { emails } }).then(({ data }) => {
-          if (data?.tpv) {
-            const tpv = data.tpv as Record<string, { tpv_mes: number; ultima_venda: string | null }>
-            setTpvMap(tpv)
+      // Busca TPV do mês via portfólio completo do Metabase (query por account_manager_id)
+      supabase.functions.invoke('mb-search', { body: {} }).then(({ data }) => {
+        if (data?.clientes) {
+          const tpv: Record<string, { tpv_mes: number; ultima_venda: string | null }> = {}
+          ;(data.clientes as any[]).forEach(c => {
+            if (c.email) tpv[c.email.toLowerCase()] = { tpv_mes: c.tpv_mes ?? 0, ultima_venda: c.ultima_venda ?? null }
+          })
+          setTpvMap(tpv)
 
-            // Move automaticamente para "Cliente faturando" se TPV mês > R$1.000
-            const toUpdate = actsList.filter(a => {
-              const t = tpv[a.email?.toLowerCase()]
-              return t && t.tpv_mes > 1000 && a.gc_status !== 'Cliente faturando'
-            })
-            if (toUpdate.length > 0) {
-              const ids = toUpdate.map(a => a.id)
-              supabase.from('activations')
-                .update({ gc_status: 'Cliente faturando' })
-                .in('id', ids)
-                .then(() => {
-                  setActs(prev => prev.map(a =>
-                    ids.includes(a.id) ? { ...a, gc_status: 'Cliente faturando' } : a
-                  ))
-                })
-            }
+          // Move automaticamente para "Cliente faturando" se TPV mês > R$1.000
+          const toUpdate = actsList.filter(a => {
+            const t = tpv[a.email?.toLowerCase()]
+            return t && t.tpv_mes > 1000 && a.gc_status !== 'Cliente faturando'
+          })
+          if (toUpdate.length > 0) {
+            const ids = toUpdate.map(a => a.id)
+            supabase.from('activations')
+              .update({ gc_status: 'Cliente faturando' })
+              .in('id', ids)
+              .then(() => {
+                setActs(prev => prev.map(a =>
+                  ids.includes(a.id) ? { ...a, gc_status: 'Cliente faturando' } : a
+                ))
+              })
           }
-          setTpvLoaded(true)
-        }).catch(() => setTpvLoaded(true))
-      } else {
+        }
         setTpvLoaded(true)
-      }
+      }).catch(() => setTpvLoaded(true))
 
       setMeetings(((mtgs || []) as any[]).map(m => ({
         id: m.id, activation_id: m.activation_id, gerente_id: m.gerente_id,
