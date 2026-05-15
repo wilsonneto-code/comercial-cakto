@@ -409,6 +409,7 @@ serve(async (req) => {
 
   // ── Modo: TPV por lista de emails — consulta DB #3 (Split) e DB #4 (Cakto)
   if (body.emails && Array.isArray(body.emails)) {
+    try {
     const emailList = body.emails.map((e: string) => `'${e.replace(/'/g, "''")}'`).join(',')
     if (!emailList) return json({ tpv: {} })
 
@@ -450,8 +451,8 @@ serve(async (req) => {
     }).then(r => r.json()).then(d => ({ rows: d?.data?.rows ?? [] }))
 
     const [splitResult, caktoResult] = await Promise.all([
-      runSQL(MB_URL, MB_KEY, sqlSplit),
-      fetchDB4(sqlCakto4),
+      runSQL(MB_URL, MB_KEY, sqlSplit).catch(() => ({ cols: [], rows: [] })),
+      fetchDB4(sqlCakto4).catch(() => ({ rows: [] })),
     ])
 
     const tpv: Record<string, { tpv_mes: number; ultima_venda: string | null }> = {}
@@ -473,6 +474,9 @@ serve(async (req) => {
     })
 
     return json({ tpv })
+    } catch (_) {
+      return json({ tpv: {} })
+    }
   }
 
   // ── Modo padrão: carteiras por account_manager_id ──────────────────────
