@@ -399,10 +399,9 @@ serve(async (req) => {
       GROUP BY u."email"
     `
 
-    // DB #4 Cakto: gateway_order via product_product (vendas como produtor)
-    const sqlCakto = `
-      SELECT
-        u."email",
+    // DB #4 Cakto: produtor principal (via product_product)
+    const sqlCaktoProd = `
+      SELECT u."email",
         COALESCE(SUM(go."amount") FILTER (
           WHERE go."status" = 'paid' AND go."created_at" >= date_trunc('month', current_date)
         ), 0) AS tpv_mes,
@@ -414,18 +413,54 @@ serve(async (req) => {
       GROUP BY u."email"
     `
 
-    const [splitResult, caktoResult] = await Promise.all([
+    // DB #4 Cakto: afiliado/coprodutor (via product_affiliate + gateway_split)
+    const sqlCaktoAfil = `
+      SELECT u."email",
+        COALESCE(SUM(
+          CASE
+            WHEN gs."amountreserve" > 0 THEN gs."amountreserve"
+            ELSE go."amount" * gs."percentage" / 100.0
+          END
+        ) FILTER (
+          WHERE go."status" = 'paid' AND go."created_at" >= date_trunc('month', current_date)
+        ), 0) AS tpv_mes,
+        COALESCE(MAX(go."created_at") FILTER (WHERE go."status" = 'paid'), NULL) AS ultima_venda
+      FROM "public"."user_user" u
+      JOIN "public"."product_affiliate" pa ON pa."user_id" = u."id" AND pa."status" = 'active'
+      JOIN "public"."gateway_order" go ON go."product_id"::text = pa."product_id"::text
+      JOIN "public"."gateway_split" gs ON gs."order_id"::text = go."id"::text AND gs."user_id" = u."id"
+      WHERE LOWER(u."email") IN (${emailList.toLowerCase()})
+      GROUP BY u."email"
+    `
+
+    const fetchCakto = (sql: string) => fetch(`${MB_URL}/api/dataset`, {
+      method: 'POST',
+      headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ database: 4, type: 'native', native: { query: sql } }),
+    }).then(r => r.json()).then(d => ({ rows: d?.data?.rows ?? [] }))
+
+    const [splitResult, caktoProd, caktoAfil] = await Promise.all([
       runSQL(MB_URL, MB_KEY, sqlSplit),
-      (async () => {
-        const res = await fetch(`${MB_URL}/api/dataset`, {
-          method: 'POST',
-          headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ database: 4, type: 'native', native: { query: sqlCakto } }),
-        })
-        const data = await res.json()
-        return { rows: data?.data?.rows ?? [] }
-      })(),
+      fetchCakto(sqlCaktoProd),
+      fetchCakto(sqlCaktoAfil),
     ])
+
+    // Combina os três em caktoResult (soma produtor + afiliado)
+    const caktoMerged: Record<string, { tpv_mes: number; ultima_venda: string | null }> = {}
+    const mergeRows = (rows: any[][], isUltimaVenda = false) => {
+      rows.forEach(r => {
+        const email = r[0]?.toLowerCase()
+        if (!email) return
+        const existing = caktoMerged[email] ?? { tpv_mes: 0, ultima_venda: null }
+        caktoMerged[email] = {
+          tpv_mes: existing.tpv_mes + Number(r[1] ?? 0),
+          ultima_venda: r[2] ?? existing.ultima_venda,
+        }
+      })
+    }
+    mergeRows(caktoProd.rows)
+    mergeRows(caktoAfil.rows)
+    const caktoResult = { rows: Object.entries(caktoMerged).map(([email, v]) => [email, v.tpv_mes, v.ultima_venda]) }
 
     const tpv: Record<string, { tpv_mes: number; ultima_venda: string | null }> = {}
 
@@ -488,11 +523,13 @@ serve(async (req) => {
     offset += PAGE
   }
 
-  // Complementa com TPV do banco Cakto #4 para emails que ainda estão zerados
+  // Complementa com TPV do banco Cakto #4 (produtor principal + afiliado/coprodutor)
   const zeroEmails = allRows.filter(r => !Number(r[5])).map(r => r[2]).filter(Boolean)
   if (zeroEmails.length > 0) {
     const emailList = zeroEmails.map((e: string) => `'${e.replace(/'/g, "''")}'`).join(',')
-    const sqlCakto = `
+
+    // Produtor principal: gateway_order via product_product
+    const sqlProdutor = `
       SELECT u."email",
         COALESCE(SUM(go."amount") FILTER (
           WHERE go."status" = 'paid' AND go."created_at" >= date_trunc('month', current_date)
@@ -503,16 +540,47 @@ serve(async (req) => {
       WHERE LOWER(u."email") IN (${emailList.toLowerCase()})
       GROUP BY u."email"
     `
-    const caktoRes = await fetch(`${MB_URL}/api/dataset`, {
-      method: 'POST',
-      headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ database: 4, type: 'native', native: { query: sqlCakto } }),
-    })
-    const caktoData = await caktoRes.json()
+
+    // Afiliado/Coprodutor: gateway_split via product_affiliate → gateway_order
+    const sqlAfiliado = `
+      SELECT u."email",
+        COALESCE(SUM(
+          CASE
+            WHEN gs."amountreserve" > 0 THEN gs."amountreserve"
+            ELSE go."amount" * gs."percentage" / 100.0
+          END
+        ) FILTER (
+          WHERE go."status" = 'paid' AND go."created_at" >= date_trunc('month', current_date)
+        ), 0) AS tpv_mes
+      FROM "public"."user_user" u
+      JOIN "public"."product_affiliate" pa ON pa."user_id" = u."id" AND pa."status" = 'active'
+      JOIN "public"."gateway_order" go ON go."product_id"::text = pa."product_id"::text
+      JOIN "public"."gateway_split" gs ON gs."order_id"::text = go."id"::text AND gs."user_id" = u."id"
+      WHERE LOWER(u."email") IN (${emailList.toLowerCase()})
+      GROUP BY u."email"
+    `
+
+    const [prodRes, afilRes] = await Promise.all([
+      fetch(`${MB_URL}/api/dataset`, {
+        method: 'POST',
+        headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ database: 4, type: 'native', native: { query: sqlProdutor } }),
+      }).then(r => r.json()),
+      fetch(`${MB_URL}/api/dataset`, {
+        method: 'POST',
+        headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ database: 4, type: 'native', native: { query: sqlAfiliado } }),
+      }).then(r => r.json()),
+    ])
+
     const caktoMap: Record<string, number> = {}
-    ;(caktoData?.data?.rows ?? []).forEach((r: any[]) => {
-      if (r[0]) caktoMap[r[0].toLowerCase()] = Number(r[1] ?? 0)
+    ;(prodRes?.data?.rows ?? []).forEach((r: any[]) => {
+      if (r[0]) caktoMap[r[0].toLowerCase()] = (caktoMap[r[0].toLowerCase()] ?? 0) + Number(r[1] ?? 0)
     })
+    ;(afilRes?.data?.rows ?? []).forEach((r: any[]) => {
+      if (r[0]) caktoMap[r[0].toLowerCase()] = (caktoMap[r[0].toLowerCase()] ?? 0) + Number(r[1] ?? 0)
+    })
+
     allRows = allRows.map(r => {
       const email = (r[2] ?? '').toLowerCase()
       const caktoTpv = caktoMap[email] ?? 0
