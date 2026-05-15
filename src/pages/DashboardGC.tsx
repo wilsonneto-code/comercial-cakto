@@ -265,19 +265,24 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
           ) : (
             <>
               {/* Barras de valor diário */}
-              <div style={{ position: 'relative' }}>
-                {/* Tooltip */}
+              <div style={{ position: 'relative' }}
+                onMouseLeave={() => setHoveredBar(null)}>
+
+                {/* Tooltip — sempre no topo, x acompanha a barra */}
                 {hoveredBar !== null && dailyTpv[hoveredBar.idx] && (() => {
                   const d = dailyTpv[hoveredBar.idx]
+                  const pct = hoveredBar.idx / (dailyTpv.length - 1)
+                  const leftPct = Math.min(Math.max(pct * 100, 5), 80)
                   return (
                     <div style={{
-                      position: 'absolute', top: hoveredBar.y - 72, left: Math.min(hoveredBar.x - 60, window.innerWidth - 160),
+                      position: 'absolute', top: 0, left: `${leftPct}%`,
+                      transform: 'translateY(-105%)',
                       background: '#1e293b', border: '1px solid var(--border)', borderRadius: 10,
-                      padding: '10px 14px', zIndex: 100, pointerEvents: 'none', minWidth: 140,
-                      boxShadow: '0 8px 24px rgba(0,0,0,.5)',
+                      padding: '10px 14px', zIndex: 100, pointerEvents: 'none', minWidth: 148,
+                      boxShadow: '0 8px 24px rgba(0,0,0,.6)',
                     }}>
                       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', marginBottom: 6 }}>{d.label}</div>
-                      <div style={{ fontSize: 15, fontWeight: 800, color: d.value > 0 ? COR.verde : 'var(--text2)' }}>{BRL(d.value)}</div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: d.value > 0 ? COR.verde : 'var(--text2)' }}>{BRL(d.value)}</div>
                       <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>
                         Acumulado: <span style={{ fontWeight: 700, color: COR.azul }}>{BRL(d.acumulado)}</span>
                       </div>
@@ -285,8 +290,7 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
                   )
                 })()}
 
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 100, marginBottom: 4, padding: '0 4px' }}
-                  onMouseLeave={() => setHoveredBar(null)}>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 100, marginBottom: 4, padding: '0 4px' }}>
                   {dailyTpv.map((d, i) => {
                     const maxVal = Math.max(...dailyTpv.map(x => x.value), 1)
                     const h = d.value > 0 ? Math.max(4, (d.value / maxVal) * 90) : 2
@@ -294,7 +298,7 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
                     const isHovered = hoveredBar?.idx === i
                     return (
                       <div key={i}
-                        onMouseEnter={e => setHoveredBar({ idx: i, x: e.currentTarget.getBoundingClientRect().left - e.currentTarget.closest('.page-wrap')!.getBoundingClientRect().left + 20, y: e.currentTarget.getBoundingClientRect().top - e.currentTarget.closest('.page-wrap')!.getBoundingClientRect().top })}
+                        onMouseEnter={() => setHoveredBar({ idx: i, x: 0, y: 0 })}
                         style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', cursor: 'crosshair', height: 100 }}>
                         <div style={{
                           width: isHovered ? '90%' : '75%', height: h,
