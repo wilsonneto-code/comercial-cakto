@@ -9,14 +9,16 @@ import { supabase } from '@/lib/supabase/client'
 import { BarChartH } from '@/components/ui/charts/BarChartH'
 import { LineAreaChart } from '@/components/ui/charts/LineAreaChart'
 import { DonutChart } from '@/components/ui/charts/DonutChart'
-import { ChevronLeft, RefreshCw, Loader2, Users, Zap, Phone, Calendar } from 'lucide-react'
+import { ChevronLeft, RefreshCw, Loader2, Users, Zap, Phone, TrendingUp } from 'lucide-react'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type DbUser       = { id: string; name: string; role: string; email: string; active: boolean }
 type Activation   = { id: string; client: string; email: string; responsible: string; date: string; channel: string | null; faturamento_mensal: number | null; gerente_id: string | null; gc_status: string; welcome_sent: boolean }
 type Call         = { id: string; date: string; status: string; responsible: string; sdr_nome: string | null; client_email: string; ativado: boolean; motivo_nao_ativacao: string | null }
-type Meeting      = { id: string; date: string; status: string; gerente_id: string | null; client_email: string }
 type CarteiraNota = { email: string; motivo: string | null; data_contato: string | null }
+type MbCliente    = { gerente: string; nome: string; email: string; tpv_mes: number | null; previsao_faturamento: number }
+
+const BRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 
 const COR = { verde: '#34C759', amarelo: '#FF9F0A', vermelho: '#FF3B30', azul: '#2997FF', roxo: '#BF5AF2' }
 
@@ -44,11 +46,11 @@ function getRange(preset: Preset, customFrom: string, customTo: string) {
 }
 
 const TABS = [
-  { key: 'geral',     label: 'Visão Geral',  icon: Zap      },
-  { key: 'ativacoes', label: 'Ativações',    icon: Users    },
-  { key: 'calls',     label: 'Calls / SDR',  icon: Phone    },
-  { key: 'reunioes',  label: 'Reuniões GC',  icon: Calendar },
-  { key: 'carteiras', label: 'Carteiras',    icon: Users    },
+  { key: 'geral',      label: 'Visão Geral',  icon: Zap        },
+  { key: 'ativacoes',  label: 'Ativações',    icon: Users      },
+  { key: 'calls',      label: 'Calls / SDR',  icon: Phone      },
+  { key: 'carteiragc', label: 'Carteira GC',  icon: TrendingUp },
+  { key: 'carteiras',  label: 'Cobertura',    icon: Users      },
 ] as const
 type TabKey = typeof TABS[number]['key']
 
@@ -74,8 +76,8 @@ function RelatoriosContent({ onBack }: { onBack?: () => void }) {
   const [users,       setUsers]       = useState<DbUser[]>([])
   const [activations, setActivations] = useState<Activation[]>([])
   const [calls,       setCalls]       = useState<Call[]>([])
-  const [meetings,    setMeetings]    = useState<Meeting[]>([])
   const [notas,       setNotas]       = useState<CarteiraNota[]>([])
+  const [mbClientes,  setMbClientes]  = useState<MbCliente[]>([])
 
   const { inicio, fim, label: rangeLabel } = getRange(preset, customFrom, customTo)
 
@@ -83,18 +85,18 @@ function RelatoriosContent({ onBack }: { onBack?: () => void }) {
 
   async function load() {
     setIsLoading(true)
-    const [{ data: u }, { data: a }, { data: c }, { data: m }, { data: n }] = await Promise.all([
+    const [{ data: u }, { data: a }, { data: c }, { data: n }, mbRes] = await Promise.all([
       supabase.from('users').select('id,name,role,email,active').order('name'),
       supabase.from('activations').select('id,client,email,responsible,date,channel,faturamento_mensal,gerente_id,gc_status,welcome_sent').gte('date', inicio).lte('date', fim),
       supabase.from('calls').select('id,date,status,responsible,sdr_nome,client_email,ativado,motivo_nao_ativacao').gte('date', inicio).lte('date', fim),
-      supabase.from('followup_meetings').select('id,date,status,gerente_id,client_email').gte('date', inicio).lte('date', fim),
       supabase.from('carteira_notas').select('email,motivo,data_contato'),
+      supabase.functions.invoke('mb-search', { body: {} }),
     ])
     if (u) setUsers(u as DbUser[])
     if (a) setActivations(a as Activation[])
     if (c) setCalls(c as Call[])
-    if (m) setMeetings(m as Meeting[])
     if (n) setNotas(n as CarteiraNota[])
+    if (mbRes.data?.clientes) setMbClientes(mbRes.data.clientes as MbCliente[])
     setIsLoading(false)
   }
 
@@ -187,11 +189,11 @@ function RelatoriosContent({ onBack }: { onBack?: () => void }) {
           ))}
         </div>
 
-        {tab === 'geral'     && <TabGeral     activations={activations} calls={calls} meetings={meetings} users={users} inicio={inicio} fim={fim} card={card} lbl={lbl} />}
-        {tab === 'ativacoes' && <TabAtivacoes activations={activations} closers={closers} inicio={inicio} fim={fim} card={card} lbl={lbl} />}
-        {tab === 'calls'     && <TabCalls     calls={calls} sdrs={sdrs} card={card} lbl={lbl} />}
-        {tab === 'reunioes'  && <TabReunioes  meetings={meetings} gerentes={gerentes} card={card} lbl={lbl} />}
-        {tab === 'carteiras' && <TabCarteiras activations={activations} gerentes={gerentes} notaMap={notaMap} card={card} lbl={lbl} />}
+        {tab === 'geral'      && <TabGeral      activations={activations} calls={calls} users={users} inicio={inicio} fim={fim} card={card} lbl={lbl} />}
+        {tab === 'ativacoes'  && <TabAtivacoes  activations={activations} closers={closers} inicio={inicio} fim={fim} card={card} lbl={lbl} />}
+        {tab === 'calls'      && <TabCalls      calls={calls} sdrs={sdrs} card={card} lbl={lbl} />}
+        {tab === 'carteiragc' && <TabCarteiraGC mbClientes={mbClientes} gerentes={gerentes} card={card} lbl={lbl} BRL={BRL} />}
+        {tab === 'carteiras'  && <TabCarteiras  activations={activations} gerentes={gerentes} notaMap={notaMap} card={card} lbl={lbl} />}
 
       </div>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
@@ -240,7 +242,7 @@ function Kpi({ label, value, color, card }: { label: string; value: string | num
 // ══════════════════════════════════════════════════════════════════════════════
 // TAB: VISÃO GERAL
 // ══════════════════════════════════════════════════════════════════════════════
-function TabGeral({ activations, calls, meetings, users, inicio, fim, card, lbl }: any) {
+function TabGeral({ activations, calls, users, inicio, fim, card, lbl }: any) {
   // Ativações por dia no range
   const days: { label: string; value: number }[] = []
   const start = new Date(inicio + 'T12:00:00')
@@ -284,7 +286,7 @@ function TabGeral({ activations, calls, meetings, users, inicio, fim, card, lbl 
         <Kpi label="Calls"           value={calls.length}                 color={COR.azul}    card={card} />
         <Kpi label="Realizadas"      value={realizadas}                   color={COR.verde}   card={card} />
         <Kpi label="Taxa conversão"  value={`${taxaConv.toFixed(1)}%`}   color={COR.verde}   card={card} />
-        <Kpi label="Reuniões GC"     value={meetings.length}              color={COR.amarelo} card={card} />
+        <Kpi label="Usuários Ativos"  value={users.filter((u: any) => u.active).length} color={COR.amarelo} card={card} />
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 200px', gap: 16, marginBottom: 16 }}>
         <div style={{ ...card, padding: 20 }}>
@@ -505,54 +507,162 @@ function TabCalls({ calls, sdrs, card, lbl }: any) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// TAB: REUNIÕES GC
+// TAB: CARTEIRA GC (dados do Metabase)
 // ══════════════════════════════════════════════════════════════════════════════
-function TabReunioes({ meetings, gerentes, card, lbl }: any) {
+function TabCarteiraGC({ mbClientes, gerentes, card, lbl, BRL }: any) {
   const [selectedGerente, setSelectedGerente] = useState('')
 
-  const base = selectedGerente ? meetings.filter((m: any) => m.gerente_id === selectedGerente) : meetings
+  const getPct = (c: MbCliente) =>
+    c.previsao_faturamento > 0 ? Math.min((c.tpv_mes ?? 0) / c.previsao_faturamento * 100, 999) : null
 
-  const total    = base.length
-  const realiz   = base.filter((m: any) => m.status === 'Realizada').length
-  const noshow   = base.filter((m: any) => m.status === 'No-show').length
-  const cancel   = base.filter((m: any) => m.status === 'Cancelada').length
-  const agendada = base.filter((m: any) => m.status === 'Agendada').length
-
-  const porGerente: Record<string, { total: number; realizadas: number; noshow: number }> = {}
-  base.forEach((m: any) => {
-    const g = (gerentes as any[]).find((u: any) => u.id === m.gerente_id)?.name ?? 'Sem gerente'
-    if (!porGerente[g]) porGerente[g] = { total: 0, realizadas: 0, noshow: 0 }
-    porGerente[g].total++
-    if (m.status === 'Realizada') porGerente[g].realizadas++
-    if (m.status === 'No-show')   porGerente[g].noshow++
+  // Agrupa por nome do gerente
+  const gerentesNomes = [...new Set((mbClientes as MbCliente[]).map(c => c.gerente))].sort()
+  const gerenteOptions = gerentesNomes.map(n => {
+    const u = (gerentes as any[]).find((g: any) => g.name === n)
+    return { id: u?.id ?? n, name: n }
   })
-  const barGerente = Object.entries(porGerente)
-    .map(([label, v]) => ({ label: label.split(' ')[0], value: v.realizadas }))
 
-  const donut = [
-    { label: 'Realizadas', value: realiz,   color: COR.verde    },
-    { label: 'Agendadas',  value: agendada, color: COR.azul     },
-    { label: 'No-show',    value: noshow,   color: COR.amarelo  },
-    { label: 'Canceladas', value: cancel,   color: COR.vermelho },
+  const base: MbCliente[] = selectedGerente
+    ? mbClientes.filter((c: MbCliente) => {
+        const u = (gerentes as any[]).find((g: any) => g.id === selectedGerente)
+        return u ? c.gerente === u.name : c.gerente === selectedGerente
+      })
+    : mbClientes
+
+  // Por gerente
+  const rows = gerentesNomes
+    .filter(n => !selectedGerente || (() => {
+      const u = (gerentes as any[]).find((g: any) => g.id === selectedGerente)
+      return u ? n === u.name : n === selectedGerente
+    })())
+    .map(nome => {
+      const cli = (mbClientes as MbCliente[]).filter(c => c.gerente === nome)
+      const tpvTotal  = cli.reduce((s, c) => s + (c.tpv_mes ?? 0), 0)
+      const prevTotal = cli.reduce((s, c) => s + c.previsao_faturamento, 0)
+      const v80  = cli.filter(c => { const p = getPct(c); return p !== null && p >= 80 }).length
+      const v50  = cli.filter(c => { const p = getPct(c); return p !== null && p >= 50 && p < 80 }).length
+      const v20  = cli.filter(c => { const p = getPct(c); return p !== null && p >= 20 && p < 50 }).length
+      const zero = cli.filter(c => { const p = getPct(c); return p !== null && p < 20 }).length
+      const semPrev = cli.filter(c => !c.previsao_faturamento).length
+      const pctGeral = prevTotal > 0 ? tpvTotal / prevTotal * 100 : 0
+      return { nome, total: cli.length, tpvTotal, prevTotal, pctGeral, v80, v50, v20, zero, semPrev }
+    })
+
+  // Totais globais
+  const totalClientes = base.length
+  const totalTpv      = base.reduce((s, c) => s + (c.tpv_mes ?? 0), 0)
+  const totalPrev     = base.reduce((s, c) => s + c.previsao_faturamento, 0)
+  const totalV80  = base.filter(c => { const p = getPct(c); return p !== null && p >= 80 }).length
+  const totalV50  = base.filter(c => { const p = getPct(c); return p !== null && p >= 50 && p < 80 }).length
+  const totalV20  = base.filter(c => { const p = getPct(c); return p !== null && p >= 20 && p < 50 }).length
+  const totalZero = base.filter(c => { const p = getPct(c); return p !== null && p < 20 }).length
+  const pctGeralTotal = totalPrev > 0 ? totalTpv / totalPrev * 100 : 0
+
+  const donutFunil = [
+    { label: '≥ 80%',   value: totalV80,  color: COR.verde    },
+    { label: '50–79%',  value: totalV50,  color: COR.amarelo  },
+    { label: '20–49%',  value: totalV20,  color: COR.vermelho },
+    { label: '< 20%',   value: totalZero, color: '#636366'    },
   ].filter(d => d.value > 0)
+
+  const pctColor = (p: number) => p >= 80 ? COR.verde : p >= 50 ? COR.amarelo : p >= 20 ? COR.vermelho : '#636366'
 
   return (
     <div>
-      <EmployeeFilter label="Filtrar por Gerente" options={gerentes} value={selectedGerente} onChange={setSelectedGerente} />
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
-        <Kpi label="Total"          value={total}                                                       color={COR.azul}    card={card} />
-        <Kpi label="Realizadas"     value={realiz}                                                      color={COR.verde}   card={card} />
-        <Kpi label="No-show"        value={noshow}                                                      color={COR.amarelo} card={card} />
-        <Kpi label="Taxa Realização"value={`${total > 0 ? (realiz / total * 100).toFixed(1) : 0}%`}   color={COR.verde}   card={card} />
+      <EmployeeFilter label="Filtrar por Gerente" options={gerenteOptions} value={selectedGerente} onChange={setSelectedGerente} />
+
+      {/* KPIs globais */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12, marginBottom: 20 }}>
+        <Kpi label="Clientes"    value={totalClientes}          color={COR.azul}    card={card} />
+        <Kpi label="TPV mês"     value={BRL(totalTpv)}          color={COR.verde}   card={card} />
+        <Kpi label="Prev. fat."  value={BRL(totalPrev)}         color={COR.roxo}    card={card} />
+        <Kpi label="% Geral"     value={`${pctGeralTotal.toFixed(1)}%`} color={pctColor(pctGeralTotal)} card={card} />
+        <Kpi label="≥ 80%"       value={totalV80}               color={COR.verde}   card={card} />
+        <Kpi label="Zerados"     value={totalZero}              color='#636366'     card={card} />
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: 16 }}>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 16, marginBottom: 16 }}>
         <div style={{ ...card, padding: 20 }}>
-          {lbl('Status')}
-          {donut.length ? <DonutChart data={donut} size={110} thickness={16} /> : <div style={{ color: 'var(--text2)', fontSize: 13 }}>Sem dados</div>}
+          {lbl('Distribuição')}
+          {donutFunil.length ? (
+            <>
+              <DonutChart data={donutFunil} size={120} thickness={16} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
+                {donutFunil.map(d => (
+                  <div key={d.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--text2)' }}>
+                      <span style={{ width: 7, height: 7, borderRadius: '50%', background: d.color, display: 'inline-block' }} />
+                      {d.label}
+                    </span>
+                    <strong style={{ color: d.color }}>{d.value}</strong>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : <div style={{ color: 'var(--text2)', fontSize: 13 }}>Sem dados do Metabase</div>}
         </div>
-        <div style={{ ...card, padding: 20 }}>
-          {lbl('Realizadas por Gerente')}
-          {barGerente.length ? <BarChartH data={barGerente} labelKey="label" valueKey="value" color1={COR.roxo} color2="#9B59B6" /> : <div style={{ color: 'var(--text2)', fontSize: 13 }}>Sem dados</div>}
+
+        {/* Tabela por gerente */}
+        <div style={{ ...card, overflow: 'hidden' }}>
+          <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 14 }}>
+            Carteira por Gerente de Contas
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: 'var(--bg-card2)' }}>
+                  {['Gerente','Clientes','TPV mês','Prev. Fat.','% Ating.','≥ 80%','50–79%','20–49%','< 20%'].map(h => (
+                    <th key={h} style={{ padding: '10px 14px', textAlign: h === 'Gerente' ? 'left' : 'right',
+                      fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase',
+                      letterSpacing: '.04em', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 && (
+                  <tr><td colSpan={9} style={{ padding: 32, textAlign: 'center', color: 'var(--text2)' }}>
+                    {mbClientes.length === 0 ? 'Carregando dados do Metabase…' : 'Sem dados'}
+                  </td></tr>
+                )}
+                {rows.map((r: any) => (
+                  <tr key={r.nome} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={{ padding: '12px 14px', fontWeight: 600 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Avatar name={r.nome} size={26} />
+                        {r.nome}
+                      </div>
+                    </td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700 }}>{r.total}</td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700, color: COR.verde }}>{BRL(r.tpvTotal)}</td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', color: COR.roxo }}>{BRL(r.prevTotal)}</td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                      <span style={{ fontWeight: 800, color: pctColor(r.pctGeral) }}>{r.pctGeral.toFixed(1)}%</span>
+                    </td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', color: COR.verde, fontWeight: 700 }}>{r.v80}</td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', color: COR.amarelo, fontWeight: 700 }}>{r.v50}</td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', color: COR.vermelho, fontWeight: 700 }}>{r.v20}</td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', color: '#8E8E93', fontWeight: 700 }}>{r.zero}</td>
+                  </tr>
+                ))}
+                {/* Totais */}
+                {rows.length > 1 && (
+                  <tr style={{ background: 'var(--bg-card2)', fontWeight: 800 }}>
+                    <td style={{ padding: '12px 14px' }}>Total</td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right' }}>{totalClientes}</td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', color: COR.verde }}>{BRL(totalTpv)}</td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', color: COR.roxo }}>{BRL(totalPrev)}</td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                      <span style={{ color: pctColor(pctGeralTotal) }}>{pctGeralTotal.toFixed(1)}%</span>
+                    </td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', color: COR.verde }}>{totalV80}</td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', color: COR.amarelo }}>{totalV50}</td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', color: COR.vermelho }}>{totalV20}</td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', color: '#8E8E93' }}>{totalZero}</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
