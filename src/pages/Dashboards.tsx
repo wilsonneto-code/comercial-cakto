@@ -4,7 +4,7 @@ import {
   BarChart2, User, TrendingUp, ChevronLeft, LayoutDashboard,
   DollarSign, Phone, Target, Award, CheckCircle, AlertCircle, Loader2, Users,
 } from 'lucide-react';
-import { useAuth } from '@/lib/authContext';
+import { useAuth, hasAnyRole } from '@/lib/authContext';
 import { useToast } from '@/components/ui/Toast';
 import { Header } from '@/components/Header';
 import { Button } from '@/components/ui/Button';
@@ -20,8 +20,9 @@ import { supabase } from '@/lib/supabase/client';
 import { DashBuilder } from './DashBuilder';
 import { DashGCContent } from './DashboardGC';
 import { DashSDRContent } from './DashboardSDR';
+import RelatoriosAdmin from './RelatoriosAdmin';
 
-type DashView = 'grid' | 'sdr' | 'gerente' | 'builder';
+type DashView = 'grid' | 'sdr' | 'gerente' | 'builder' | 'relatorios';
 type DbUser = { id: string; name: string; role: string; team_id: string | null; active: boolean }
 type DbActivation = { responsible: string; date: string; channel: string }
 
@@ -75,17 +76,21 @@ export default function DashboardsPage() {
 
 function DashboardsContent() {
   const [view, setView] = useState<DashView>('grid');
+  const { user } = useAuth();
+  const isAdmin = hasAnyRole(user, ['Admin']);
   const navigate = useNavigate();
-  if (view === 'sdr')     return <DashSDRContent onBack={() => setView('grid')} />;
-  if (view === 'gerente') return <DashGCContent onBack={() => setView('grid')} />;
-  if (view === 'builder') return <DashBuilder  onBack={() => setView('grid')} />;
+  if (view === 'sdr')        return <DashSDRContent  onBack={() => setView('grid')} />;
+  if (view === 'gerente')    return <DashGCContent   onBack={() => setView('grid')} />;
+  if (view === 'builder')    return <DashBuilder     onBack={() => setView('grid')} />;
+  if (view === 'relatorios') return <RelatoriosAdmin onBack={() => setView('grid')} />;
 
   const panelCards = [
-    { key: 'builder' as DashView, title: 'Dashboard Builder', desc: 'Crie e configure painéis personalizados com gráficos e métricas.',    icon: LayoutDashboard, color: '#3B82F6',       disabled: false },
-    { key: 'sdr'     as DashView, title: 'Dashboard SDR',     desc: 'Calls agendadas vs realizadas, funil de conversão, ranking e motivos de não ativação.', icon: User, color: 'var(--action)', disabled: false },
-    { key: 'gerente' as DashView, title: 'Dashboard Gerente', desc: 'Carteira de clientes, % atingido, motivos, alertas e cobertura de notas.', icon: TrendingUp, color: 'var(--purple)', disabled: false },
-    { key: 'grid'    as DashView, title: 'Relatórios',        desc: 'Em breve — relatórios exportáveis, comparativos e histórico.',        icon: BarChart2,       color: 'var(--cyan)',   disabled: true  },
-  ] as const;
+    { key: 'relatorios' as DashView, title: 'Relatórios Gerais', desc: 'Visão completa de todos os módulos: ativações, calls, reuniões, carteiras, pagamentos e auditoria.', icon: BarChart2, color: '#EF4444', disabled: false, adminOnly: true },
+    { key: 'builder' as DashView, title: 'Dashboard Builder', desc: 'Crie e configure painéis personalizados com gráficos e métricas.',    icon: LayoutDashboard, color: '#3B82F6',       disabled: false, adminOnly: false },
+    { key: 'sdr'     as DashView, title: 'Dashboard SDR',     desc: 'Calls agendadas vs realizadas, funil de conversão, ranking e motivos de não ativação.', icon: User,          color: 'var(--action)', disabled: false, adminOnly: false },
+    { key: 'gerente' as DashView, title: 'Dashboard Gerente', desc: 'Carteira de clientes, % atingido, motivos, alertas e cobertura de notas.',                  icon: TrendingUp,    color: 'var(--purple)', disabled: false, adminOnly: false },
+    { key: 'grid'    as DashView, title: 'Relatórios',        desc: 'Em breve — relatórios exportáveis, comparativos e histórico.',                              icon: BarChart2,     color: 'var(--cyan)',   disabled: true,  adminOnly: false },
+  ];
 
   const timeCards = [
     { num: '01', color: '#F59E0B' },
@@ -150,15 +155,18 @@ function DashboardsContent() {
           Painéis
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
-          {panelCards.map(card => (
+          {panelCards.filter(c => !c.adminOnly || isAdmin).map(card => (
             <div key={card.key} className="card-hover" onClick={() => !card.disabled && setView(card.key)} style={{
-              background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, padding: 24,
+              background: 'var(--bg-card)', border: `1px solid ${card.adminOnly ? 'color-mix(in srgb, #EF4444 30%, var(--border))' : 'var(--border)'}`, borderRadius: 16, padding: 24,
               cursor: card.disabled ? 'default' : 'pointer', opacity: card.disabled ? 0.5 : 1,
               display: 'flex', flexDirection: 'column', gap: 16,
             }}>
-              <div style={{ width: 48, height: 48, borderRadius: 12, background: `color-mix(in srgb, ${card.color} 15%, transparent)`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <card.icon size={24} color={card.color} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={{ width: 48, height: 48, borderRadius: 12, background: `color-mix(in srgb, ${card.color} 15%, transparent)`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <card.icon size={24} color={card.color} />
+                </div>
+                {card.adminOnly && <Badge label="Admin" color="#EF4444" />}
               </div>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>{card.title}</div>
