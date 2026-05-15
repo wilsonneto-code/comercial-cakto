@@ -16,6 +16,7 @@ export default function DebugMb() {
   const [statusRes,  setStatusRes]  = useState<any>(null)
   const [tablesRes,  setTablesRes]  = useState<any>(null)
   const [findRes,    setFindRes]    = useState<any>(null)
+  const [deepRes,    setDeepRes]    = useState<any[]>([])
   const [isLoading,  setIsLoading]  = useState(false)
   const [loadingDbs, setLoadingDbs] = useState(false)
 
@@ -32,29 +33,33 @@ export default function DebugMb() {
   async function runAll() {
     if (!email.trim() || databases.length === 0) return
     setIsLoading(true)
-    setResults({}); setStatusRes(null); setTablesRes(null); setFindRes(null)
-    const entries = await Promise.all(
-      databases.map(db =>
-        supabase.functions.invoke('mb-search', {
-          body: { test_db: db.id, debug_email: email.trim().toLowerCase() },
-        }).then(({ data }) => [db.id, data] as [number, any])
-      )
-    )
+    setResults({}); setStatusRes(null); setTablesRes(null); setFindRes(null); setDeepRes([])
+
+    // Exploração profunda em paralelo com a busca por banco
+    const [entries, deepData] = await Promise.all([
+      Promise.all(
+        databases.map(db =>
+          supabase.functions.invoke('mb-search', {
+            body: { test_db: db.id, debug_email: email.trim().toLowerCase() },
+          }).then(({ data }) => [db.id, data] as [number, any])
+        )
+      ),
+      supabase.functions.invoke('mb-search', {
+        body: { deep_explore: true, debug_email: email.trim().toLowerCase() },
+      }),
+    ])
+
     const res = Object.fromEntries(entries)
     setResults(res)
+    if (deepData.data?.report) setDeepRes(deepData.data.report)
 
-    // Roniaria está no Split (#3) com user_id 1247735 — busca todos os status
     const splitResult = res[3]
     const userId = splitResult?.rows?.[0]?.[0]
     if (userId) {
-      const [statusData, tablesData, findData] = await Promise.all([
-        supabase.functions.invoke('mb-search', { body: { all_statuses: true, user_id: userId, db_id: 3 } }),
-        supabase.functions.invoke('mb-search', { body: { list_tables: true, db_id: 4 } }),
-        supabase.functions.invoke('mb-search', { body: { find_user: true, debug_email: email.trim().toLowerCase(), db_id: 4 } }),
-      ])
+      const statusData = await supabase.functions.invoke('mb-search', {
+        body: { all_statuses: true, user_id: userId, db_id: 3 },
+      })
       setStatusRes({ userId, data: statusData.data })
-      setTablesRes(tablesData.data)
-      setFindRes(findData.data)
     }
     setIsLoading(false)
   }
@@ -170,23 +175,57 @@ export default function DebugMb() {
           </div>
         )}
 
-        {/* Busca por usuário no banco Cakto #4 */}
-        {findRes && (
-          <div style={card}>
-            <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 14 }}>
-              Busca por email no banco Cakto #4
-            </div>
-            {findRes?.results?.length === 0
-              ? <div style={{ padding: 16, color: '#FF9F0A', fontSize: 13 }}>Email não encontrado em nenhuma tabela padrão do banco Cakto</div>
-              : findRes?.results?.map((r: any, i: number) => (
-                  <div key={i}>
-                    <div style={{ padding: '8px 20px', fontSize: 11, color: 'var(--text2)', fontFamily: 'monospace', background: 'var(--bg-card2)' }}>{r.sql}</div>
-                    <Table cols={r.cols} rows={r.rows} />
+        {/* Exploração profunda — tabelas encontradas e pagamentos */}
+        {deepRes.length > 0 && (() => {
+          const allTables3  = deepRes.find(r => r.dbId === 3 && r.type === 'tables')
+          const allTables4  = deepRes.find(r => r.dbId === 4 && r.type === 'tables')
+          const foundUsers  = deepRes.filter(r => r.type === 'found_user')
+          const foundPay    = deepRes.filter(r => r.type === 'found_payments')
+          return (
+            <>
+              {/* Tabelas dos dois bancos */}
+              {[allTables3, allTables4].filter(Boolean).map((t: any) => (
+                <div key={t.dbId} style={card}>
+                  <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 14 }}>
+                    Todas as tabelas — #{t.dbId} {databases.find(d => d.id === t.dbId)?.name}
+                    <span style={{ fontSize: 12, color: 'var(--text2)', marginLeft: 8, fontWeight: 400 }}>{t.tables?.length} tabelas</span>
                   </div>
-                ))
-            }
-          </div>
-        )}
+                  <div style={{ padding: '12px 20px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {(t.tables ?? []).map((name: string) => {
+                      const isPay = ['payment','order','transaction','sale','subscription','invoice','charge','purchase'].some(k => name.toLowerCase().includes(k))
+                      return <span key={name} style={{ fontSize: 11, padding: '3px 9px', borderRadius: 20, background: isPay ? 'color-mix(in srgb, #34C759 15%, var(--bg-card2))' : 'var(--bg-card2)', color: isPay ? '#34C759' : 'var(--text2)', border: '1px solid var(--border)', fontFamily: 'monospace' }}>{name}</span>
+                    })}
+                  </div>
+                </div>
+              ))}
+
+              {/* Usuários encontrados */}
+              {foundUsers.map((r: any, i: number) => (
+                <div key={i} style={card}>
+                  <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 14, color: '#34C759' }}>
+                    ✓ Usuário encontrado — #{r.dbId} {databases.find(d => d.id === r.dbId)?.name} → {r.table}
+                  </div>
+                  <Table cols={r.cols} rows={r.rows} />
+                </div>
+              ))}
+
+              {/* Pagamentos encontrados */}
+              {foundPay.length > 0 ? foundPay.map((r: any, i: number) => (
+                <div key={i} style={card}>
+                  <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 14, color: '#34C759' }}>
+                    ✓ Pagamentos encontrados — #{r.dbId} {databases.find(d => d.id === r.dbId)?.name} → {r.table}
+                  </div>
+                  <div style={{ padding: '6px 20px', fontSize: 11, fontFamily: 'monospace', color: 'var(--text2)', background: 'var(--bg-card2)' }}>{r.sql}</div>
+                  <Table cols={r.cols} rows={r.rows} />
+                </div>
+              )) : (
+                <div style={{ ...card, padding: 20, color: '#FF9F0A', fontSize: 13 }}>
+                  ⚠ Nenhuma tabela de pagamento encontrada com dados para esse usuário nos bancos #3 e #4
+                </div>
+              )}
+            </>
+          )
+        })()}
       </div>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </>

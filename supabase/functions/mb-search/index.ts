@@ -146,6 +146,68 @@ serve(async (req) => {
     return json({ cols: data?.data?.cols?.map((c: any) => c.name) ?? [], rows: data?.data?.rows ?? [], error: data?.error ?? null })
   }
 
+  // ── Modo: exploração profunda — listar tabelas e buscar pagamentos ────────
+  if (body.deep_explore && body.debug_email) {
+    const email  = body.debug_email.toLowerCase().replace(/'/g, "''")
+    const dbIds  = [3, 4]
+    const report: any[] = []
+
+    for (const dbId of dbIds) {
+      // 1. Lista todas as tabelas
+      const tablesRes = await fetch(`${MB_URL}/api/dataset`, {
+        method: 'POST',
+        headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ database: dbId, type: 'native', native: { query: `SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema') ORDER BY table_schema, table_name` } }),
+      })
+      const tablesData = await tablesRes.json()
+      const tables: string[][] = tablesData?.data?.rows ?? []
+      report.push({ dbId, type: 'tables', tables: tables.map(r => `${r[0]}.${r[1]}`) })
+
+      // 2. Para cada tabela que tem "email" ou "user" no nome, tenta buscar o email
+      const emailTables = tables.filter(r => {
+        const name = (r[1] ?? '').toLowerCase()
+        return name.includes('user') || name.includes('customer') || name.includes('client') || name.includes('subscriber') || name.includes('member')
+      })
+      for (const [schema, table] of emailTables.slice(0, 8)) {
+        const searchRes = await fetch(`${MB_URL}/api/dataset`, {
+          method: 'POST',
+          headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ database: dbId, type: 'native', native: { query: `SELECT * FROM "${schema}"."${table}" WHERE email ILIKE '${email}' LIMIT 3` } }),
+        })
+        const sd = await searchRes.json()
+        if (!sd?.error && (sd?.data?.rows?.length ?? 0) > 0) {
+          report.push({ dbId, type: 'found_user', table: `${schema}.${table}`, cols: sd.data.cols.map((c: any) => c.name), rows: sd.data.rows })
+        }
+      }
+
+      // 3. Para tabelas de pagamento, busca por user_id da Roniaria (1247735)
+      const payTables = tables.filter(r => {
+        const name = (r[1] ?? '').toLowerCase()
+        return name.includes('payment') || name.includes('order') || name.includes('transaction') || name.includes('sale') || name.includes('subscription') || name.includes('invoice') || name.includes('charge') || name.includes('purchase')
+      })
+      for (const [schema, table] of payTables.slice(0, 10)) {
+        // Tenta por user_id e por email direto
+        const queries = [
+          `SELECT status, SUM(amount) as total, COUNT(*) as count FROM "${schema}"."${table}" WHERE user_id = 1247735 GROUP BY status`,
+          `SELECT status, SUM(value) as total, COUNT(*) as count FROM "${schema}"."${table}" WHERE user_id = 1247735 GROUP BY status`,
+          `SELECT status, COUNT(*) as count FROM "${schema}"."${table}" WHERE email ILIKE '${email}' GROUP BY status`,
+        ]
+        for (const sql of queries) {
+          const r2 = await fetch(`${MB_URL}/api/dataset`, {
+            method: 'POST',
+            headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ database: dbId, type: 'native', native: { query: sql } }),
+          })
+          const d2 = await r2.json()
+          if (!d2?.error && (d2?.data?.rows?.length ?? 0) > 0) {
+            report.push({ dbId, type: 'found_payments', table: `${schema}.${table}`, cols: d2.data.cols.map((c: any) => c.name), rows: d2.data.rows, sql })
+          }
+        }
+      }
+    }
+    return json({ report })
+  }
+
   // ── Modo: buscar usuário por email em banco genérico (tabelas flexíveis) ──
   if (body.find_user && body.debug_email) {
     const dbId  = Number(body.db_id ?? 4)
