@@ -191,25 +191,35 @@ serve(async (req) => {
     if (!viewDef.error && viewDef.rows.length > 0)
       results.push({ table: 'vendas_por_usuario (SQL da view)', note: 'definição completa', cols: viewDef.cols, rows: viewDef.rows })
 
-    // 3. gateway_order — todas as colunas da linha dela (waiting_payment)
-    const goFull = await runQ(`SELECT * FROM "public"."gateway_order" WHERE user_id = ${userId} LIMIT 5`)
-    if (!goFull.error && goFull.rows.length > 0)
-      results.push({ table: 'gateway_order (completo)', note: 'todas as colunas', ...goFull })
+    // 3. gateway_split — tabela de divisão de receita (coprodução)
+    const gsSample2 = await runQ(`SELECT * FROM "public"."gateway_split" LIMIT 1`)
+    results.push({ table: 'gateway_split (colunas)', note: `colunas: ${gsSample2.cols.join(', ')}`, cols: gsSample2.cols, rows: gsSample2.rows })
 
-    // 4. gateway_payment_orders ligado ao gateway_order dela
-    const gpFull = await runQ(`
-      SELECT gpo.* FROM "public"."gateway_payment_orders" gpo
-      JOIN "public"."gateway_order" go ON go.id = gpo.order_id
-      WHERE go.user_id = ${userId}
-      LIMIT 10
-    `)
-    if (!gpFull.error && gpFull.rows.length > 0)
-      results.push({ table: 'gateway_payment_orders (da order dela)', note: 'pagamentos vinculados', ...gpFull })
+    // Tenta buscar split por user_id com vários campos possíveis
+    for (const field of ['user_id', 'recipient_id', 'co_producer_id', 'seller_id', 'beneficiary_id']) {
+      if (!gsSample2.cols.includes(field)) continue
+      const r = await runQ(`
+        SELECT gs.status, COUNT(*) as count, SUM(gs.amount) as total
+        FROM "public"."gateway_split" gs
+        WHERE gs."${field}" = ${userId}
+        GROUP BY gs.status
+      `)
+      if (!r.error && r.rows.length > 0) {
+        results.push({ table: `gateway_split (por ${field})`, note: `✓ encontrou dados de split!`, ...r })
+      }
+    }
 
-    // 5. Busca na customer_customer por email (pode ter outro id)
-    const custRes = await runQ(`SELECT * FROM "public"."customer_customer" WHERE email ILIKE '${body.debug_email?.toLowerCase() ?? ''}' LIMIT 5`)
-    if (!custRes.error && custRes.rows.length > 0)
-      results.push({ table: 'customer_customer (por email)', note: 'pode ter id diferente', ...custRes })
+    // 4. product_affiliate — pode conter a relação de coprodução
+    const afSample = await runQ(`SELECT * FROM "public"."product_affiliate" LIMIT 1`)
+    results.push({ table: 'product_affiliate (colunas)', note: `colunas: ${afSample.cols.join(', ')}`, cols: afSample.cols, rows: afSample.rows })
+
+    for (const field of ['user_id', 'affiliate_id', 'co_producer_id', 'member_id']) {
+      if (!afSample.cols.includes(field)) continue
+      const r = await runQ(`SELECT * FROM "public"."product_affiliate" WHERE "${field}" = ${userId} LIMIT 5`)
+      if (!r.error && r.rows.length > 0) {
+        results.push({ table: `product_affiliate (por ${field})`, note: '✓ encontrou registro!', ...r })
+      }
+    }
 
     // 2. gateway_order — orders diretos
     const goSample = await runQ(`SELECT * FROM "public"."gateway_order" LIMIT 1`)
