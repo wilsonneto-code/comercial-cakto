@@ -107,6 +107,71 @@ serve(async (req) => {
     })
   }
 
+  // ── Modo: todos os status de um usuário (por user_id) ────────────────────
+  if (body.all_statuses && body.user_id) {
+    const userId = Number(body.user_id)
+    const dbId   = Number(body.db_id ?? DB_ID)
+    const sql = `
+      SELECT
+        p."status",
+        COUNT(*) AS count,
+        SUM(p."liquidAmount") AS total_liquid,
+        SUM(p."amount") AS total_amount,
+        MIN(p."createdAt") AS first_date,
+        MAX(p."createdAt") AS last_date
+      FROM "public"."payment_payment" p
+      WHERE p."user_id" = ${userId}
+      GROUP BY p."status"
+      ORDER BY count DESC
+    `
+    const res = await fetch(`${MB_URL}/api/dataset`, {
+      method: 'POST',
+      headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ database: dbId, type: 'native', native: { query: sql } }),
+    })
+    const data = await res.json()
+    return json({ cols: data?.data?.cols?.map((c: any) => c.name) ?? [], rows: data?.data?.rows ?? [], error: data?.error ?? null })
+  }
+
+  // ── Modo: listar tabelas de um banco ─────────────────────────────────────
+  if (body.list_tables) {
+    const dbId = Number(body.db_id)
+    const sql  = `SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema') ORDER BY table_schema, table_name LIMIT 80`
+    const res  = await fetch(`${MB_URL}/api/dataset`, {
+      method: 'POST',
+      headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ database: dbId, type: 'native', native: { query: sql } }),
+    })
+    const data = await res.json()
+    return json({ cols: data?.data?.cols?.map((c: any) => c.name) ?? [], rows: data?.data?.rows ?? [], error: data?.error ?? null })
+  }
+
+  // ── Modo: buscar usuário por email em banco genérico (tabelas flexíveis) ──
+  if (body.find_user && body.debug_email) {
+    const dbId  = Number(body.db_id ?? 4)
+    const email = body.debug_email.toLowerCase().replace(/'/g, "''")
+    // Tenta várias combinações de tabelas comuns em plataformas de pagamento
+    const queries = [
+      `SELECT id, email, name FROM public.users WHERE LOWER(email) = '${email}' LIMIT 5`,
+      `SELECT id, email FROM public.customers WHERE LOWER(email) = '${email}' LIMIT 5`,
+      `SELECT id, email FROM public.user WHERE LOWER(email) = '${email}' LIMIT 5`,
+      `SELECT id, email FROM public.accounts WHERE LOWER(email) = '${email}' LIMIT 5`,
+    ]
+    const results: any[] = []
+    for (const sql of queries) {
+      const res  = await fetch(`${MB_URL}/api/dataset`, {
+        method: 'POST',
+        headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ database: dbId, type: 'native', native: { query: sql } }),
+      })
+      const data = await res.json()
+      if (!data?.error && data?.data?.rows?.length > 0) {
+        results.push({ sql, cols: data.data.cols.map((c: any) => c.name), rows: data.data.rows })
+      }
+    }
+    return json({ db_id: dbId, results })
+  }
+
   // ── Modo debug: inspecionar pagamentos brutos de um email ───────────────
   if (body.debug_email) {
     const email = body.debug_email.toLowerCase().replace(/'/g, "''")
