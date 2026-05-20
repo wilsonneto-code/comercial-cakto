@@ -28,7 +28,7 @@ type DbUser = {
   setor: string | null
 }
 
-const COMMERCIAL_ROLES: string[] = ['SDR', 'Closer', 'Gerente de Contas', 'Head Comercial', 'Admin']
+const COMMERCIAL_ROLES: string[] = ['SDR', 'Closer', 'Gerente de Contas', 'Head Comercial', 'Sócio', 'Admin']
 
 type DbTeam = {
   id: string
