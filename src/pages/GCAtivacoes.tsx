@@ -20,6 +20,7 @@ type DbActivation = {
   id: string; client: string; email: string | null; phone: string | null
   channel: string; responsible: string; date: string; time: string | null
   sdr_id: string | null; sdr_nome: string | null; indicado_por: string | null
+  gc_ativacao: boolean
 }
 type DbUser  = { id: string; name: string; email: string | null; role: string; team_id: string | null }
 type DbTeam  = { id: string; name: string }
@@ -90,13 +91,13 @@ function GCAtivacoesCont({ isAdmin, currentUser }: { isAdmin: boolean; currentUs
     const prevMonthStart = format(startOfMonth(subMonths(now, 1)), 'yyyy-MM-dd')
     const prevMonthEnd   = format(endOfMonth(subMonths(now, 1)), 'yyyy-MM-dd')
     Promise.all([
-      supabase.from('activations').select('id', { count: 'exact', head: true }).eq('date', todayStr).is('sdr_id', null),
-      supabase.from('activations').select('id', { count: 'exact', head: true }).eq('date', yesterdayStr).is('sdr_id', null),
-      supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', weekStart).lte('date', todayStr).is('sdr_id', null),
-      supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', prevWeekStart).lte('date', prevWeekEnd).is('sdr_id', null),
-      supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', monthStart).lte('date', todayStr).is('sdr_id', null),
-      supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', prevMonthStart).lte('date', prevMonthEnd).is('sdr_id', null),
-      supabase.from('activations').select('id', { count: 'exact', head: true }).is('sdr_id', null),
+      supabase.from('activations').select('id', { count: 'exact', head: true }).eq('date', todayStr).eq('gc_ativacao', true),
+      supabase.from('activations').select('id', { count: 'exact', head: true }).eq('date', yesterdayStr).eq('gc_ativacao', true),
+      supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', weekStart).lte('date', todayStr).eq('gc_ativacao', true),
+      supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', prevWeekStart).lte('date', prevWeekEnd).eq('gc_ativacao', true),
+      supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', monthStart).lte('date', todayStr).eq('gc_ativacao', true),
+      supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', prevMonthStart).lte('date', prevMonthEnd).eq('gc_ativacao', true),
+      supabase.from('activations').select('id', { count: 'exact', head: true }).eq('gc_ativacao', true),
     ]).then(([r1, r2, r3, r4, r5, r6, r7]) => {
       setKpis({ today: r1.count ?? 0, yesterday: r2.count ?? 0, week: r3.count ?? 0, weekPrev: r4.count ?? 0, month: r5.count ?? 0, monthPrev: r6.count ?? 0, total: r7.count ?? 0 })
     })
@@ -118,7 +119,7 @@ function GCAtivacoesCont({ isAdmin, currentUser }: { isAdmin: boolean; currentUs
           .select('id,client,email,phone,channel,responsible,date,time,sdr_id,sdr_nome,indicado_por')
           .gte('date', dateRange.startDate)
           .lte('date', dateRange.endDate)
-          .is('sdr_id', null)
+          .eq('gc_ativacao', true)
           .order('date', { ascending: false })
           .order('time', { ascending: false }),
         supabase.from('users').select('id,name,email,role,team_id').order('name'),
@@ -248,7 +249,7 @@ function GCAtivacoesCont({ isAdmin, currentUser }: { isAdmin: boolean; currentUs
         client: capitalize(form.client), email: emailSanitized, phone: form.phone || null,
         channel: form.channel as ActivationChannel, responsible: form.responsible,
         date: form.date, time,
-        sdr_id: null, sdr_nome: null, sem_sdr: true,
+        sdr_id: null, sdr_nome: null, sem_sdr: true, gc_ativacao: true,
         notes: form.notes || null,
         image_urls: imageUrls,
         faturamento_mensal: form.faturamento_mensal ? parseFloat(form.faturamento_mensal.replace(/\./g,'').replace(',','.')) || null : null,
