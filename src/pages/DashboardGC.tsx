@@ -106,7 +106,12 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
     setDailyTpv(points)
   }
 
-  const refresh = async () => { setIsRefresh(true); await Promise.all([load(), loadDailyTpv()]); setIsRefresh(false) }
+  const refresh = async () => {
+    setIsRefresh(true)
+    await supabase.functions.invoke('calcular-tpv', { body: { limite: 500 } })
+    await Promise.all([load(), loadDailyTpv()])
+    setIsRefresh(false)
+  }
 
   const gerentes = [...new Set(clientes.map(c => c.gerente))].sort()
   const base = clientes.filter(c =>

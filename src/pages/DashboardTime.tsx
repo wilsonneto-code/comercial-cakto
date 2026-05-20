@@ -22,6 +22,7 @@ import {
   removerCliente, editarCliente,
   type ClienteAtivo,
 } from '../services/tpvClientesService'
+import { supabase } from '@/lib/supabase/client'
 
 const TIMES = ['01', '02']
 const BRL = (v: number) =>
@@ -114,7 +115,10 @@ function DashboardTimeContent({ timeNum, userRole }: { timeNum: string; userRole
   // ── Sincronizar clientes ────────────────────────────────────────────────────
   async function sincronizar() {
     setSincronizando(true)
-    await sincronizarClientesDoTime(timeNum)
+    await Promise.all([
+      supabase.functions.invoke('calcular-tpv', { body: { limite: 500 } }),
+      sincronizarClientesDoTime(timeNum),
+    ])
     const dados = await getClientesAtivos(timeNum)
     setClientes(dados)
     setSincronizando(false)
