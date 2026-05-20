@@ -20,6 +20,7 @@ import Pagamentos from './pages/Pagamentos'
 import Carteiras from './pages/Carteiras'
 import DashboardGC from './pages/DashboardGC'
 import DebugMb from './pages/DebugMb'
+import GCAtivacoes from './pages/GCAtivacoes'
 
 const MAIN_DOMAINS = [
   'localhost',
@@ -77,6 +78,7 @@ export default function App() {
       <Route path="/configuracoes" element={<ProtectedRoute><Configuracoes /></ProtectedRoute>} />
       <Route path="/relatorio-pipeline" element={<ProtectedRoute><RelatorioDataCrazy /></ProtectedRoute>} />
       <Route path="/gerente-contas" element={<ProtectedRoute><GerenteContas /></ProtectedRoute>} />
+      <Route path="/gc-ativacoes" element={<ProtectedRoute><GCAtivacoes /></ProtectedRoute>} />
       <Route path="/pagamentos" element={<ProtectedRoute><Pagamentos /></ProtectedRoute>} />
       <Route path="/carteiras" element={<ProtectedRoute><Carteiras /></ProtectedRoute>} />
       <Route path="/metabase" element={<ProtectedRoute><Carteiras /></ProtectedRoute>} />
