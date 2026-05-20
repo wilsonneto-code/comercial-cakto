@@ -400,7 +400,7 @@ function AgendaContent() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))', gap: 12, marginBottom: 20 }}>
           {([
             { label: 'Agendadas',  value: calls.filter(c => c.status === 'Agendada').length,  color: 'var(--action)' },
-            { label: 'Realizadas', value: calls.filter(c => c.status === 'Realizada').length, color: 'var(--green)'  },
+            { label: `Realizadas (${String(month + 1).padStart(2,'0')}/${year})`, value: calls.filter(c => c.status === 'Realizada' && c.date.startsWith(`${year}-${String(month + 1).padStart(2,'0')}`)).length, color: 'var(--green)'  },
             { label: 'Canceladas', value: calls.filter(c => c.status === 'Cancelada').length, color: 'var(--red)'    },
             { label: 'No-show',    value: calls.filter(c => c.status === 'No-show').length,   color: 'var(--orange)' },
           ] as { label: string; value: number; color: string }[]).map(k => (
