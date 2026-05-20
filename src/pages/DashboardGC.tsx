@@ -3,6 +3,7 @@ import { Header } from '../../components/Header'
 import { useAuth, hasAnyRole } from '@/lib/authContext'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase/client'
+import { getMbClientes, getMbDailyTpv, invalidateMbCache } from '@/lib/mbCache'
 import { DonutChart } from '@/components/ui/charts/DonutChart'
 import { BarChartH } from '@/components/ui/charts/BarChartH'
 import { LineAreaChart } from '@/components/ui/charts/LineAreaChart'
@@ -60,13 +61,13 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
   useEffect(() => { load() }, [])
   useEffect(() => { loadDailyTpv() }, [mes, gerente, gcNome])
 
-  async function load() {
+  async function load(forceRefresh = false) {
     setIsLoading(true)
-    const [{ data: mb }, { data: nd }] = await Promise.all([
-      supabase.functions.invoke('mb-search', { body: {} }),
+    const [clientes, { data: nd }] = await Promise.all([
+      getMbClientes(forceRefresh),
       supabase.from('carteira_notas').select('*'),
     ])
-    if (mb?.clientes) setClientes(mb.clientes)
+    setClientes(clientes as Cliente[])
     if (nd) setNotas(nd)
     setIsLoading(false)
   }
@@ -84,10 +85,8 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
     }
     // amIds vazio = todos os gerentes
 
-    const { data } = await supabase.functions.invoke('mb-search', {
-      body: { daily_tpv: true, month: mes, ...(amIds.length ? { account_manager_ids: amIds } : {}) },
-    })
-    if (!data?.daily) return setDailyTpv([])
+    const daily = await getMbDailyTpv(mes, amIds)
+    if (!daily) return setDailyTpv([])
 
     const [y, m] = mes.split('-').map(Number)
     const daysInMonth = new Date(y, m, 0).getDate()
@@ -95,7 +94,7 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
     const points = Array.from({ length: daysInMonth }, (_, i) => {
       const day = String(i + 1).padStart(2, '0')
       const dateStr = `${mes}-${day}`
-      const val = Number(data.daily[dateStr] ?? 0)
+      const val = Number((daily as Record<string, unknown>)[dateStr] ?? 0)
       acumulado += val
       return {
         label: `${String(i + 1).padStart(2, '0')}/${m.toString().padStart(2, '0')}`,
@@ -108,8 +107,9 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
 
   const refresh = async () => {
     setIsRefresh(true)
+    invalidateMbCache()
     await supabase.functions.invoke('calcular-tpv', { body: { limite: 30 } })
-    await Promise.all([load(), loadDailyTpv()])
+    await Promise.all([load(true), loadDailyTpv()])
     setIsRefresh(false)
   }
 

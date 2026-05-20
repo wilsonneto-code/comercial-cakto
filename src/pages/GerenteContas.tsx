@@ -11,6 +11,7 @@ import { Sheet } from '@/components/ui/Sheet'
 import { Field, Sel } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
 import { supabase } from '@/lib/supabase/client'
+import { getMbClientes } from '@/lib/mbCache'
 
 const DAYS   = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb']
 const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
@@ -203,19 +204,17 @@ function GCContent() {
       // para cobrir clientes sem gerente no Metabase
       const emails = actsList.map(a => a.email).filter(Boolean)
       Promise.all([
-        supabase.functions.invoke('mb-search', { body: {} }),
+        getMbClientes(),
         emails.length > 0
           ? supabase.functions.invoke('mb-search', { body: { emails } })
           : Promise.resolve({ data: null }),
-      ]).then(([portfolioRes, emailRes]) => {
+      ]).then(([portfolioClientes, emailRes]) => {
         const tpv: Record<string, { tpv_mes: number; ultima_venda: string | null }> = {}
 
         // 1. Dados do portfólio (mais completos para quem tem account_manager)
-        if (portfolioRes.data?.clientes) {
-          ;(portfolioRes.data.clientes as any[]).forEach(c => {
-            if (c.email) tpv[c.email.toLowerCase()] = { tpv_mes: c.tpv_mes ?? 0, ultima_venda: c.ultima_venda ?? null }
-          })
-        }
+        ;(portfolioClientes as any[]).forEach(c => {
+          if (c.email) tpv[c.email.toLowerCase()] = { tpv_mes: c.tpv_mes ?? 0, ultima_venda: c.ultima_venda ?? null }
+        })
 
         // 2. Query direta por email — cobre clientes fora do portfólio
         if (emailRes.data?.tpv) {

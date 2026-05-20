@@ -3,6 +3,7 @@ import { Header } from '../../components/Header'
 import { useAuth, hasAnyRole } from '@/lib/authContext'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase/client'
+import { getMbClientes, invalidateMbCache } from '@/lib/mbCache'
 import { RefreshCw, Search, TrendingUp, DollarSign, MessageSquare, Zap, Tag, CheckCircle, X } from 'lucide-react'
 import { useToast } from '../../components/ui/Toast'
 
@@ -80,13 +81,13 @@ function CarteirasContent() {
 
   useEffect(() => { loadData() }, [])
 
-  async function loadData() {
+  async function loadData(forceRefresh = false) {
     setIsLoading(true)
-    const [{ data: mbData }, { data: notasData }] = await Promise.all([
-      supabase.functions.invoke('mb-search', { body: {} }),
+    const [clientes, { data: notasData }] = await Promise.all([
+      getMbClientes(forceRefresh),
       supabase.from('carteira_notas').select('*'),
     ])
-    if (mbData?.clientes) setClientes(mbData.clientes as CarteiraCli[])
+    setClientes(clientes as CarteiraCli[])
     if (notasData) {
       const map: Record<string, Nota> = {}
       notasData.forEach((n: any) => { map[n.email] = n })
@@ -97,7 +98,8 @@ function CarteirasContent() {
 
   async function refresh() {
     setIsRefreshing(true)
-    await loadData()
+    invalidateMbCache()
+    await loadData(true)
     setIsRefreshing(false)
   }
 
