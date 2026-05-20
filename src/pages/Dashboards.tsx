@@ -101,7 +101,7 @@ function DashboardsContent() {
     | { type: 'view'; key: DashView }
   )
   const mainCards: MainCard[] = [
-    { type: 'navigate', path: '/dashboard/time/01', label: 'Dashboard Closers', desc: 'Performance dos closers: calls, ativações, conversão e TPV por closer.',          color: '#F59E0B', icon: Users       },
+    { type: 'navigate', path: '/dashboard/closers', label: 'Dashboard Closers', desc: 'Performance dos closers: calls, ativações, conversão e TPV por closer.',          color: '#F59E0B', icon: Users       },
     { type: 'view',     key: 'sdr',                  label: 'Dashboard SDR',     desc: 'Calls agendadas vs realizadas, funil de conversão, ranking e motivos de não ativação.', color: 'var(--action)', icon: User },
     { type: 'view',     key: 'gerente',               label: 'Dashboard Gerente', desc: 'Carteira de clientes, % atingido, motivos, alertas e cobertura de notas.',        color: 'var(--purple)', icon: TrendingUp },
     { type: 'navigate', path: '/ranking',             label: 'Ranking',           desc: 'Classificação geral da equipe por ativações, performance e pontuação.',           color: '#FF9F0A', icon: Award },

@@ -19,6 +19,7 @@ import PublicForm from './pages/PublicForm'
 import Pagamentos from './pages/Pagamentos'
 import Carteiras from './pages/Carteiras'
 import DashboardGC from './pages/DashboardGC'
+import DashboardClosers from './pages/DashboardClosers'
 import DebugMb from './pages/DebugMb'
 import GCAtivacoes from './pages/GCAtivacoes'
 
@@ -74,6 +75,7 @@ export default function App() {
       <Route path="/relatorio-calls" element={<ProtectedRoute><RelatoriosCalls /></ProtectedRoute>} />
       <Route path="/dashboards" element={<ProtectedRoute><Dashboards /></ProtectedRoute>} />
       <Route path="/dashboard/time/:timeId" element={<ProtectedRoute><DashboardTime /></ProtectedRoute>} />
+      <Route path="/dashboard/closers" element={<ProtectedRoute><DashboardClosers /></ProtectedRoute>} />
       <Route path="/dashboard/lifetime" element={<ProtectedRoute><DashboardLifetime /></ProtectedRoute>} />
       <Route path="/configuracoes" element={<ProtectedRoute><Configuracoes /></ProtectedRoute>} />
       <Route path="/relatorio-pipeline" element={<ProtectedRoute><RelatorioDataCrazy /></ProtectedRoute>} />
