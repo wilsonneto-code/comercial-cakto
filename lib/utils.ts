@@ -1,13 +1,14 @@
 export const AVATAR_PALETTE = ['#2997FF','#BF5AF2','#34C759','#FF375F','#FF9500','#64D2FF','#FFD60A','#FF453A'];
 
-export function avatarColor(name = '') {
+export function avatarColor(name: string | null | undefined = '') {
+  const n = name ?? '';
   let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xFFFFFF;
+  for (let i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) & 0xFFFFFF;
   return AVATAR_PALETTE[Math.abs(h) % AVATAR_PALETTE.length];
 }
 
-export function initials(name = '') {
-  return name.split(' ').filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
+export function initials(name: string | null | undefined = '') {
+  return (name ?? '').split(' ').filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
 }
 
 export function formatDate(str: string) {
