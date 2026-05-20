@@ -378,7 +378,7 @@ function DashboardClosersContent() {
         </div>
 
         {/* ── KPI row ─────────────────────────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 12, marginBottom: 24 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 24 }}>
           <KpiCard
             label="Closers Ativos"
             value={closers.length}
@@ -396,24 +396,21 @@ function DashboardClosersContent() {
             value={BRL(kpi.fatTotal)}
             icon={DollarSign}
             color="#34C759"
+            valueSize={22}
           />
           <KpiCard
             label="Ticket Médio"
             value={BRL(kpi.ticketMedioGeral)}
             icon={TrendingUp}
             color="#F59E0B"
+            valueSize={22}
           />
           <KpiCard
             label="TPV Total 30d"
             value={BRL(kpi.tpvTotal30d)}
             icon={TrendingUp}
             color="#BF5AF2"
-          />
-          <KpiCard
-            label="Bônus Total"
-            value={BRL(kpi.bonusTotal)}
-            icon={DollarSign}
-            color="#34C759"
+            valueSize={22}
           />
         </div>
 

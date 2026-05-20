@@ -10,9 +10,10 @@ interface KpiCardProps {
   color?: string;
   trend?: number;
   style?: React.CSSProperties;
+  valueSize?: number;
 }
 
-export function KpiCard({ label, value, sub, icon: Icon = Activity, color = 'var(--action)', trend, style: s }: KpiCardProps) {
+export function KpiCard({ label, value, sub, icon: Icon = Activity, color = 'var(--action)', trend, style: s, valueSize = 32 }: KpiCardProps) {
   return (
     <div className="kpi-card" style={s}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
@@ -25,7 +26,7 @@ export function KpiCard({ label, value, sub, icon: Icon = Activity, color = 'var
           <Icon size={18} color={color} />
         </div>
       </div>
-      <div style={{ fontSize: 32, fontWeight: 800, letterSpacing: '-.03em',
+      <div style={{ fontSize: valueSize, fontWeight: 800, letterSpacing: '-.03em',
         color: 'var(--text)', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
         {value}
       </div>
