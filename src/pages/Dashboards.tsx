@@ -78,6 +78,7 @@ function DashboardsContent() {
   const [view, setView] = useState<DashView>('grid');
   const { user } = useAuth();
   const isAdmin = hasAnyRole(user, ['Admin']);
+  const isSocio = (user?.extra_roles ?? []).includes('Sócio');
   const navigate = useNavigate();
   if (view === 'sdr')        return <DashSDRContent  onBack={() => setView('grid')} />;
   if (view === 'gerente')    return <DashGCContent   onBack={() => setView('grid')} />;
@@ -85,15 +86,25 @@ function DashboardsContent() {
   if (view === 'relatorios') return <RelatoriosAdmin onBack={() => setView('grid')} />;
 
   const panelCards = [
-    { key: 'relatorios' as DashView, title: 'Relatórios Gerais', desc: 'Visão completa de todos os módulos: ativações, calls, reuniões, carteiras, pagamentos e auditoria.', icon: BarChart2, color: '#EF4444', disabled: false, adminOnly: true },
-    { key: 'builder' as DashView, title: 'Dashboard Builder', desc: 'Crie e configure painéis personalizados com gráficos e métricas.',    icon: LayoutDashboard, color: '#3B82F6',       disabled: false, adminOnly: false },
-    { key: 'sdr'     as DashView, title: 'Dashboard SDR',     desc: 'Calls agendadas vs realizadas, funil de conversão, ranking e motivos de não ativação.', icon: User,          color: 'var(--action)', disabled: false, adminOnly: false },
-    { key: 'gerente' as DashView, title: 'Dashboard Gerente', desc: 'Carteira de clientes, % atingido, motivos, alertas e cobertura de notas.',                  icon: TrendingUp,    color: 'var(--purple)', disabled: false, adminOnly: false },
+    { key: 'relatorios' as DashView, title: 'Relatórios Gerais', desc: 'Visão completa de todos os módulos: ativações, calls, reuniões, carteiras, pagamentos e auditoria.', icon: BarChart2,  color: '#EF4444', disabled: false, navigate: undefined },
+    { key: 'pagamentos' as DashView, title: 'Pagamentos',        desc: 'Gestão de pagamentos, comissões e bônus da equipe.',                                                  icon: DollarSign, color: '#22C55E', disabled: false, navigate: '/pagamentos' },
   ];
 
-  const timeCards = [
-    { num: '01', color: '#F59E0B' },
-    { num: '02', color: '#22C55E' },
+  // Time 02 visível apenas para admins nos painéis
+  const adminTimeCards = [
+    { num: '02', color: '#22C55E', label: 'Tarefas GC', desc: 'Tarefas concluídas por gerente de contas.' },
+  ];
+
+  // Cards de dashboards principais (Closers, SDR, Gerente)
+  type MainCard = { label: string; desc: string; color: string; icon: any } & (
+    | { type: 'navigate'; path: string }
+    | { type: 'view'; key: DashView }
+  )
+  const mainCards: MainCard[] = [
+    { type: 'navigate', path: '/dashboard/time/01', label: 'Dashboard Closers', desc: 'Performance dos closers: calls, ativações, conversão e TPV por closer.',          color: '#F59E0B', icon: Users       },
+    { type: 'view',     key: 'sdr',                  label: 'Dashboard SDR',     desc: 'Calls agendadas vs realizadas, funil de conversão, ranking e motivos de não ativação.', color: 'var(--action)', icon: User },
+    { type: 'view',     key: 'gerente',               label: 'Dashboard Gerente', desc: 'Carteira de clientes, % atingido, motivos, alertas e cobertura de notas.',        color: 'var(--purple)', icon: TrendingUp },
+    { type: 'navigate', path: '/ranking',             label: 'Ranking',           desc: 'Classificação geral da equipe por ativações, performance e pontuação.',           color: '#FF9F0A', icon: Award },
   ];
 
   const lifetimeCard = { title: 'Dashboard Lifetime', desc: 'TPV total de clientes pós 30 dias de ativação.', color: '#22D3EE', path: '/dashboard/lifetime' };
@@ -104,36 +115,35 @@ function DashboardsContent() {
       <div className="page-wrap">
         <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-.02em', marginBottom: 24 }}>Dashboards</h1>
 
-        {/* Dashboards de time */}
+        {/* ── Dashboards principais: Closers, SDR, Gerente ── */}
         <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text2)', marginBottom: 12 }}>
-          TPV por Time
+          Dashboards
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12, marginBottom: 28 }}>
-          {timeCards.map(tc => (
-            <div key={tc.num} className="card-hover" onClick={() => navigate(`/dashboard/time/${tc.num}`)} style={{
-              background: 'var(--bg-card)', border: `1px solid var(--border)`, borderRadius: 14, padding: 20,
-              cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 12,
-            }}>
-              <div style={{ width: 42, height: 42, borderRadius: 10, background: `color-mix(in srgb, ${tc.color} 15%, transparent)`,
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12, marginBottom: 28 }}>
+          {mainCards.map(card => (
+            <div key={card.label} className="card-hover"
+              onClick={() => card.type === 'navigate' ? navigate(card.path) : setView(card.key)}
+              style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 20, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ width: 42, height: 42, borderRadius: 10, background: `color-mix(in srgb, ${card.color} 15%, transparent)`,
                 display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Users size={20} color={tc.color} />
+                <card.icon size={20} color={card.color} />
               </div>
               <div>
-                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Time {tc.num}</div>
-                <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.4 }}>TPV acumulado, meta e evolução do time.</div>
+                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{card.label}</div>
+                <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.4 }}>{card.desc}</div>
               </div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: tc.color }}>Abrir dashboard →</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: card.color }}>Abrir dashboard →</div>
             </div>
           ))}
         </div>
 
-        {/* Dashboard Lifetime */}
+        {/* ── Dashboard Lifetime ── */}
         <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text2)', marginBottom: 12 }}>
           Lifetime
         </div>
         <div style={{ marginBottom: 28 }}>
           <div className="card-hover" onClick={() => navigate(lifetimeCard.path)} style={{
-            background: 'var(--bg-card)', border: `1px solid var(--border)`, borderRadius: 14, padding: 20,
+            background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 20,
             cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 280,
           }}>
             <div style={{ width: 42, height: 42, borderRadius: 10, background: `color-mix(in srgb, ${lifetimeCard.color} 15%, transparent)`,
@@ -148,33 +158,55 @@ function DashboardsContent() {
           </div>
         </div>
 
-        {/* Dashboards de painel */}
-        <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text2)', marginBottom: 12 }}>
-          Painéis
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
-          {panelCards.filter(c => !c.adminOnly || isAdmin).map(card => (
-            <div key={card.key} className="card-hover" onClick={() => !card.disabled && setView(card.key)} style={{
-              background: 'var(--bg-card)', border: `1px solid ${card.adminOnly ? 'color-mix(in srgb, #EF4444 30%, var(--border))' : 'var(--border)'}`, borderRadius: 16, padding: 24,
-              cursor: card.disabled ? 'default' : 'pointer', opacity: card.disabled ? 0.5 : 1,
-              display: 'flex', flexDirection: 'column', gap: 16,
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div style={{ width: 48, height: 48, borderRadius: 12, background: `color-mix(in srgb, ${card.color} 15%, transparent)`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <card.icon size={24} color={card.color} />
-                </div>
-                {card.adminOnly && <Badge label="Admin" color="#EF4444" />}
-              </div>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>{card.title}</div>
-                <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.5 }}>{card.desc}</div>
-              </div>
-              {!card.disabled && <div style={{ fontSize: 13, fontWeight: 600, color: card.color }}>Abrir dashboard →</div>}
-              {card.disabled && <Badge label="Em breve" color="var(--text2)" />}
+        {/* ── Painéis — Admin e Sócio ── */}
+        {(isAdmin || isSocio) && (
+          <>
+            <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text2)', marginBottom: 12 }}>
+              Painéis
             </div>
-          ))}
-        </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
+              {panelCards.map(card => (
+                <div key={card.key} className="card-hover" onClick={() => { if (card.disabled) return; card.navigate ? navigate(card.navigate) : setView(card.key) }} style={{
+                  background: 'var(--bg-card)', border: '1px solid color-mix(in srgb, #EF4444 30%, var(--border))', borderRadius: 16, padding: 24,
+                  cursor: card.disabled ? 'default' : 'pointer', opacity: card.disabled ? 0.5 : 1,
+                  display: 'flex', flexDirection: 'column', gap: 16,
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ width: 48, height: 48, borderRadius: 12, background: `color-mix(in srgb, ${card.color} 15%, transparent)`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <card.icon size={24} color={card.color} />
+                    </div>
+                    <Badge label="Admin" color="#EF4444" />
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>{card.title}</div>
+                    <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.5 }}>{card.desc}</div>
+                  </div>
+                  {!card.disabled && <div style={{ fontSize: 13, fontWeight: 600, color: card.color }}>Abrir dashboard →</div>}
+                </div>
+              ))}
+              {adminTimeCards.filter(tc => isAdmin || (isSocio && tc.num === '02')).map(tc => (
+                <div key={tc.num} className="card-hover" onClick={() => navigate(`/dashboard/time/${tc.num}`)} style={{
+                  background: 'var(--bg-card)', border: '1px solid color-mix(in srgb, #EF4444 30%, var(--border))', borderRadius: 16, padding: 24,
+                  cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 16,
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ width: 48, height: 48, borderRadius: 12, background: `color-mix(in srgb, ${tc.color} 15%, transparent)`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Users size={24} color={tc.color} />
+                    </div>
+                    <Badge label="Admin" color="#EF4444" />
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>{tc.label}</div>
+                    <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.5 }}>{tc.desc}</div>
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: tc.color }}>Abrir dashboard →</div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </>
   );
