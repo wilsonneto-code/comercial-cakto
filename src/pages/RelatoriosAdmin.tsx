@@ -506,7 +506,7 @@ function TabAtivacoes({ activations, closers, inicio, fim, card, lbl }: any) {
         <div style={{ ...card, padding: 20 }}>
           {lbl('Ativações por dia')}
           {days.length > 1
-            ? <LineAreaChart data={days} height={130} color={COR.roxo} valueKey="value" labelKey="label" />
+            ? <BarChartV data={days} height={130} color={COR.roxo} valueKey="value" labelKey="label" />
             : <div style={{ height: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text2)', fontSize: 13 }}>Selecione um período maior</div>
           }
         </div>
@@ -657,7 +657,7 @@ function TabCalls({ calls, sdrs, inicio, fim, card, lbl }: any) {
       <div style={{ ...card, padding: 20, marginBottom: 16 }}>
         {lbl('Calls Agendadas por Dia')}
         {callDays.length > 1
-          ? <LineAreaChart data={callDays} height={120} color={COR.azul} valueKey="value" labelKey="label" />
+          ? <BarChartV data={callDays} height={120} color={COR.azul} valueKey="value" labelKey="label" />
           : <div style={{ height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text2)', fontSize: 13 }}>Selecione um período maior</div>
         }
       </div>
