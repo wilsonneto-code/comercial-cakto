@@ -201,32 +201,22 @@ function GCContent() {
       const actsList = (acts || []) as DbActivation[]
       setActs(actsList)
 
-      // Busca TPV: combina portfólio (account_manager_id) + query direta por email
-      // para cobrir clientes sem gerente no Metabase
-      const emails = actsList.map(a => a.email).filter(Boolean)
-      Promise.all([
-        getMbClientes(),
-        emails.length > 0
-          ? supabase.functions.invoke('mb-search', { body: { emails } })
-          : Promise.resolve({ data: null }),
-      ]).then(([portfolioClientes, emailRes]) => {
+      // Busca TPV direto do tpv_cache (rápido — query local no Supabase)
+      supabase
+        .from('tpv_cache')
+        .select('cliente_email, tpv_30_dias, data_fechamento')
+        .then(({ data: cache }) => {
         const tpv: Record<string, { tpv_mes: number; ultima_venda: string | null }> = {}
 
-        // 1. Dados do portfólio (mais completos para quem tem account_manager)
-        ;(portfolioClientes as any[]).forEach(c => {
-          if (c.email) tpv[c.email.toLowerCase()] = { tpv_mes: c.tpv_mes ?? 0, ultima_venda: c.ultima_venda ?? null }
+        ;(cache ?? []).forEach(row => {
+          const email = row.cliente_email?.toLowerCase()
+          if (!email) return
+          const existing = tpv[email]
+          const tpvVal = Number(row.tpv_30_dias ?? 0)
+          if (!existing || tpvVal > existing.tpv_mes) {
+            tpv[email] = { tpv_mes: tpvVal, ultima_venda: row.data_fechamento ?? null }
+          }
         })
-
-        // 2. Query direta por email — cobre clientes fora do portfólio
-        if (emailRes.data?.tpv) {
-          Object.entries(emailRes.data.tpv as Record<string, any>).forEach(([email, val]: [string, any]) => {
-            // Só sobrescreve se não veio do portfólio ou se o valor direto for maior
-            const existing = tpv[email]
-            if (!existing || val.tpv_mes > existing.tpv_mes) {
-              tpv[email] = { tpv_mes: val.tpv_mes ?? 0, ultima_venda: val.ultima_venda ?? null }
-            }
-          })
-        }
 
         setTpvMap(tpv)
 
