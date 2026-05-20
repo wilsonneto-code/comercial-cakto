@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, ChevronLeft, ChevronRight, Video, Trash2, Phone, Calendar, Loader2, CheckCircle, XCircle, Clock, MessageCircle } from 'lucide-react'
+import { Plus, ChevronLeft, ChevronRight, Video, Trash2, Phone, Calendar, Loader2, CheckCircle, XCircle, Clock, MessageCircle, RefreshCw } from 'lucide-react'
 import { useAuth, hasAnyRole } from '@/lib/authContext'
 import { Header } from '@/components/Header'
 import { Avatar } from '@/components/ui/Avatar'
@@ -11,7 +11,7 @@ import { Sheet } from '@/components/ui/Sheet'
 import { Field, Sel } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
 import { supabase } from '@/lib/supabase/client'
-import { getMbClientes } from '@/lib/mbCache'
+import { getMbClientes, invalidateMbCache } from '@/lib/mbCache'
 
 const DAYS   = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb']
 const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
@@ -127,6 +127,7 @@ function GCContent() {
   const [tpvMap, setTpvMap]       = useState<Record<string, { tpv_mes: number; ultima_venda: string | null }>>({})
   const [tpvLoaded, setTpvLoaded] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [isSaving, setIsSaving]   = useState(false)
 
   // Filtros
@@ -260,6 +261,33 @@ function GCContent() {
     }
     load()
   }, [])
+
+  async function refreshTpv() {
+    setIsRefreshing(true)
+    setTpvLoaded(false)
+    invalidateMbCache()
+    const emails = acts.map(a => a.email).filter(Boolean)
+    const [portfolioClientes, emailRes] = await Promise.all([
+      getMbClientes(true),
+      emails.length > 0
+        ? supabase.functions.invoke('mb-search', { body: { emails } })
+        : Promise.resolve({ data: null }),
+    ])
+    const tpv: Record<string, { tpv_mes: number; ultima_venda: string | null }> = {}
+    ;(portfolioClientes as any[]).forEach(c => {
+      if (c.email) tpv[c.email.toLowerCase()] = { tpv_mes: c.tpv_mes ?? 0, ultima_venda: c.ultima_venda ?? null }
+    })
+    if (emailRes.data?.tpv) {
+      Object.entries(emailRes.data.tpv as Record<string, any>).forEach(([email, val]: [string, any]) => {
+        const existing = tpv[email]
+        if (!existing || val.tpv_mes > existing.tpv_mes)
+          tpv[email] = { tpv_mes: val.tpv_mes ?? 0, ultima_venda: val.ultima_venda ?? null }
+      })
+    }
+    setTpvMap(tpv)
+    setTpvLoaded(true)
+    setIsRefreshing(false)
+  }
 
   const gerentes = users.filter(u => u.role === 'Gerente de Contas')
   const closers  = users.filter(u => u.role === 'Closer')
@@ -665,6 +693,15 @@ function GCContent() {
                 ✓ Google Calendar conectado
               </button>
             )}
+            <button onClick={refreshTpv} disabled={isRefreshing} style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
+              borderRadius: 8, border: '1px solid var(--border)', cursor: isRefreshing ? 'default' : 'pointer',
+              background: 'var(--bg-card)', color: 'var(--text2)', fontWeight: 600, fontSize: 13, fontFamily: 'inherit',
+              opacity: isRefreshing ? 0.7 : 1,
+            }}>
+              <RefreshCw size={14} style={{ animation: isRefreshing ? 'spin 1s linear infinite' : 'none' }} />
+              {isRefreshing ? 'Atualizando…' : 'Atualizar TPV'}
+            </button>
             <Button icon={Plus} onClick={() => openNewMeet()}>Nova Reunião</Button>
           </div>
         </div>
