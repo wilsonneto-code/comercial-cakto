@@ -1,0 +1,376 @@
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useAuth } from '@/lib/authContext'
+import { Header } from '@/components/Header'
+import { Avatar } from '@/components/ui/Avatar'
+import { supabase } from '@/lib/supabase/client'
+import { ChevronDown, Loader2 } from 'lucide-react'
+
+const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
+
+const CALL_STATUS_COLORS: Record<string, string> = {
+  Agendada:  'var(--action)',
+  Realizada: 'var(--green)',
+  Cancelada: 'var(--red)',
+  'No-show': 'var(--orange)',
+}
+
+const GCAL_COLORS: Record<number, string> = {
+  1:'#7986cb',2:'#33b679',3:'#8e24aa',4:'#e67c73',5:'#f6c026',
+  6:'#f5511d',7:'#039be5',8:'#3f51b5',9:'#0b8043',10:'#d50000',11:'#f691b3',
+}
+function closerColor(name: string) {
+  let h = 0
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) & 0xffff
+  return GCAL_COLORS[(h % 11) + 1] ?? '#7986cb'
+}
+
+type DbUser  = { id: string; name: string; role: string }
+type HistRow = {
+  id: string; title: string; date: string; time: string; end_time: string | null
+  responsible: string; status: string; notes: string; client_email: string
+  google_event_id: string; meet_link: string; period: string
+  ativado: boolean | null; motivo_nao_ativacao: string | null
+  source: 'calls' | 'history'
+}
+type PeriodStats = {
+  period: string
+  label: string
+  total: number
+  realized: number
+  canceled: number
+  noshow: number
+  scheduled: number
+  ativados: number
+  naoAtivados: number
+  closers: {
+    id: string; name: string; total: number; done: number; rate: number
+    ativados: number; naoAtivados: number
+    calls: { id: string; title: string; date: string; time: string; status: string; notes: string; client_email: string; ativado: boolean | null; motivo_nao_ativacao: string | null; source: 'calls' | 'history' }[]
+  }[]
+}
+
+export default function RelatoriosCalls() {
+  const { user, loading } = useAuth()
+  const navigate = useNavigate()
+  useEffect(() => { if (!loading && !user) navigate('/login') }, [user, loading, navigate])
+  if (loading || !user) return null
+  return <RelatoriosContent />
+}
+
+function RelatoriosContent() {
+  const today = new Date()
+  const currentPeriod = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
+
+  const [isLoading, setIsLoading]             = useState(true)
+  const [periods, setPeriods]                 = useState<PeriodStats[]>([])
+  const [selectedPeriod, setSelectedPeriod]   = useState<string>(currentPeriod)
+  const [expandedClosers, setExpandedClosers] = useState<Set<string>>(new Set())
+  const [savingId, setSavingId]               = useState<string | null>(null)
+
+  async function updateCallAtivacao(callId: string, ativado: boolean) {
+    setSavingId(callId)
+    const { error } = await supabase.from('calls').update({ ativado }).eq('id', callId)
+    if (!error) {
+      setPeriods(prev => prev.map(p => ({
+        ...p,
+        ativados:    p.closers.flatMap(c => c.calls).filter(r => (r.id === callId ? ativado : r.ativado) === true).length,
+        naoAtivados: p.closers.flatMap(c => c.calls).filter(r => (r.id === callId ? ativado : r.ativado) === false).length,
+        closers: p.closers.map(c => ({
+          ...c,
+          calls:       c.calls.map(r => r.id === callId ? { ...r, ativado } : r),
+          ativados:    c.calls.filter(r => (r.id === callId ? ativado : r.ativado) === true).length,
+          naoAtivados: c.calls.filter(r => (r.id === callId ? ativado : r.ativado) === false).length,
+        })),
+      })))
+    }
+    setSavingId(null)
+  }
+
+  useEffect(() => {
+    async function load() {
+      setIsLoading(true)
+      const [{ data: dbUsers }, { data: dbHistory }, { data: dbCalls }] = await Promise.all([
+        supabase.from('users').select('id,name,role').order('name'),
+        supabase.from('calls_history')
+          .select('id,title,date,time,end_time,responsible,status,notes,client_email,google_event_id,meet_link,period')
+          .order('period', { ascending: false }),
+        supabase.from('calls')
+          .select('id,title,date,time,end_time,responsible,status,notes,client_email,google_event_id,meet_link,ativado,motivo_nao_ativacao'),
+      ])
+
+      const users  = (dbUsers  || []) as DbUser[]
+      const closers = users.filter(u => u.role === 'Closer')
+
+      const currentRows: HistRow[] = (dbCalls || []).map((c: any) => ({
+        ...c,
+        period:              (c.date as string)?.slice(0, 7) ?? currentPeriod,
+        ativado:             c.ativado ?? null,
+        motivo_nao_ativacao: c.motivo_nao_ativacao ?? null,
+        source:              'calls' as const,
+      }))
+      const allRows: HistRow[] = [
+        ...(dbHistory || []).map((c: any) => ({ ...c, source: 'history' as const })),
+        ...currentRows,
+      ]
+
+      const periodMap = new Map<string, HistRow[]>()
+      for (const row of allRows) {
+        if (!periodMap.has(row.period)) periodMap.set(row.period, [])
+        periodMap.get(row.period)!.push(row)
+      }
+
+      const result: PeriodStats[] = []
+      for (const [period, rows] of [...periodMap.entries()].sort((a, b) => b[0].localeCompare(a[0]))) {
+        const [py, pm] = period.split('-').map(Number)
+        result.push({
+          period,
+          label: `${MONTHS[pm - 1]} ${py}${period === currentPeriod ? ' (mês atual)' : ''}`,
+          total:       rows.length,
+          realized:    rows.filter(r => r.status === 'Realizada').length,
+          canceled:    rows.filter(r => r.status === 'Cancelada').length,
+          noshow:      rows.filter(r => r.status === 'No-show').length,
+          scheduled:   rows.filter(r => r.status === 'Agendada').length,
+          ativados:    rows.filter(r => r.ativado === true).length,
+          naoAtivados: rows.filter(r => r.ativado === false).length,
+          closers: closers.map(u => {
+            const uRows = rows.filter(r => r.responsible === u.id)
+            const done  = uRows.filter(r => r.status === 'Realizada').length
+            return {
+              id: u.id, name: u.name,
+              total: uRows.length, done,
+              rate:        uRows.length ? Math.round((done / uRows.length) * 100) : 0,
+              ativados:    uRows.filter(r => r.ativado === true).length,
+              naoAtivados: uRows.filter(r => r.ativado === false).length,
+              calls: uRows
+                .sort((a, b) => a.date.localeCompare(b.date))
+                .map(r => ({ id: r.id, title: r.title, date: r.date, time: (r.time || '').slice(0, 5), status: r.status, notes: r.notes ?? '', client_email: r.client_email ?? '', ativado: r.ativado ?? null, motivo_nao_ativacao: r.motivo_nao_ativacao ?? null, source: r.source })),
+            }
+          }).filter(c => c.total > 0),
+        })
+      }
+
+      setPeriods(result)
+      setIsLoading(false)
+    }
+    load()
+  }, [])
+
+  function toggleCloser(key: string) {
+    setExpandedClosers(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
+  }
+
+  return (
+    <>
+      <Header />
+      <div className="page-wrap">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-.02em' }}>Relatório de Calls</h1>
+        </div>
+
+        {isLoading ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 300, gap: 10, color: 'var(--text2)' }}>
+            <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} />
+            <span style={{ fontSize: 14 }}>Carregando relatórios…</span>
+            <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
+          </div>
+        ) : periods.length === 0 ? (
+          <div style={{ textAlign: 'center', color: 'var(--text2)', padding: 64, fontSize: 14 }}>
+            Nenhum dado encontrado.
+          </div>
+        ) : (
+          <>
+            {/* ── Filtro de mês ──────────────────────────────────────── */}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
+              {periods.map(p => {
+                const active = selectedPeriod === p.period
+                return (
+                  <button key={p.period} onClick={() => { setSelectedPeriod(p.period); setExpandedClosers(new Set()) }}
+                    style={{
+                      padding: '7px 18px', borderRadius: 20, border: `1px solid ${active ? 'transparent' : 'var(--border)'}`,
+                      background: active ? 'var(--action)' : 'var(--bg-card)',
+                      color: active ? '#fff' : 'var(--text2)',
+                      fontWeight: 600, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', transition: 'all .15s',
+                    }}>
+                    {p.label}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* ── Período selecionado ────────────────────────────────── */}
+            {periods.filter(p => p.period === selectedPeriod).map(p => (
+              <div key={p.period} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
+                <div style={{ padding: 24 }}>
+
+                      {/* KPIs do período */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 10, marginBottom: 24 }}>
+                        {[
+                          { label: 'Total de Calls', value: p.total,       color: 'var(--text)'   },
+                          { label: 'Realizadas',     value: p.realized,    color: 'var(--green)'  },
+                          { label: 'Taxa Realização',value: p.total ? `${Math.round((p.realized / p.total) * 100)}%` : '—', color: p.total && (p.realized / p.total) >= 0.7 ? 'var(--green)' : 'var(--orange)' },
+                          { label: 'Ativados',       value: p.ativados,    color: 'var(--green)'  },
+                          { label: 'Não Ativados',   value: p.naoAtivados, color: 'var(--red)'    },
+                          { label: 'Canceladas',     value: p.canceled,    color: 'var(--red)'    },
+                          { label: 'No-show',        value: p.noshow,      color: 'var(--orange)' },
+                          { label: 'Agendadas',      value: p.scheduled,   color: 'var(--action)' },
+                        ].map(k => (
+                          <div key={k.label} style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: 14 }}>
+                            <div style={{ fontSize: 22, fontWeight: 800, color: k.color }}>{k.value}</div>
+                            <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>{k.label}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Performance por Closer */}
+                      {p.closers.length > 0 && (
+                        <>
+                          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>Performance por Closer</div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            {p.closers.map(c => {
+                              const cc = closerColor(c.name)
+                              const closerKey = `${p.period}-${c.id}`
+                              const closerOpen = expandedClosers.has(closerKey)
+                              return (
+                                <div key={c.id} style={{ background: 'var(--bg-card2)', borderRadius: 10, overflow: 'hidden' }}>
+                                  <button onClick={() => toggleCloser(closerKey)} style={{
+                                    width: '100%', display: 'flex', alignItems: 'center', gap: 14,
+                                    padding: '12px 16px', background: 'none', border: 'none', cursor: 'pointer',
+                                    color: 'var(--text)', fontFamily: 'inherit',
+                                  }}>
+                                    <Avatar name={c.name} size={32} />
+                                    <div style={{ flex: 1, textAlign: 'left' }}>
+                                      <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
+                                      <div style={{ fontSize: 11, color: 'var(--text2)' }}>
+                                        {c.total} call{c.total !== 1 ? 's' : ''} · {c.done} realizadas
+                                        {c.ativados > 0 && <span style={{ color: 'var(--green)', marginLeft: 6 }}>· {c.ativados} ativados</span>}
+                                        {c.naoAtivados > 0 && <span style={{ color: 'var(--red)', marginLeft: 6 }}>· {c.naoAtivados} não ativados</span>}
+                                      </div>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                      {/* Taxa de Realização */}
+                                      <div style={{ width: 90 }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginBottom: 3 }}>
+                                          <span style={{ color: 'var(--text2)' }}>Realização</span>
+                                          <span style={{ fontWeight: 700, color: c.rate >= 70 ? 'var(--green)' : c.rate >= 40 ? 'var(--orange)' : 'var(--red)' }}>{c.rate}%</span>
+                                        </div>
+                                        <div style={{ height: 5, borderRadius: 3, background: 'var(--border)' }}>
+                                          <div style={{ height: '100%', borderRadius: 3, width: `${c.rate}%`, background: c.rate >= 70 ? 'var(--green)' : c.rate >= 40 ? 'var(--orange)' : 'var(--red)', transition: 'width .3s' }} />
+                                        </div>
+                                      </div>
+                                      {/* Taxa de Ativação */}
+                                      {(() => {
+                                        const respondidas = c.ativados + c.naoAtivados
+                                        const taxaAtiv = respondidas > 0 ? Math.round((c.ativados / respondidas) * 100) : null
+                                        return (
+                                          <div style={{ width: 90 }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginBottom: 3 }}>
+                                              <span style={{ color: 'var(--text2)' }}>Ativação</span>
+                                              <span style={{ fontWeight: 700, color: taxaAtiv === null ? 'var(--text2)' : taxaAtiv >= 70 ? 'var(--green)' : taxaAtiv >= 40 ? 'var(--orange)' : 'var(--red)' }}>
+                                                {taxaAtiv === null ? '—' : `${taxaAtiv}%`}
+                                              </span>
+                                            </div>
+                                            <div style={{ height: 5, borderRadius: 3, background: 'var(--border)' }}>
+                                              <div style={{ height: '100%', borderRadius: 3, width: `${taxaAtiv ?? 0}%`, background: taxaAtiv === null ? 'var(--border)' : taxaAtiv >= 70 ? 'var(--green)' : taxaAtiv >= 40 ? 'var(--orange)' : 'var(--red)', transition: 'width .3s' }} />
+                                            </div>
+                                          </div>
+                                        )
+                                      })()}
+                                      <ChevronDown size={14} style={{ color: 'var(--text2)', transform: closerOpen ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
+                                    </div>
+                                  </button>
+                                  {closerOpen && c.calls.length > 0 && (
+                                    <div style={{ borderTop: '1px solid var(--border)', overflowX: 'auto' }}>
+                                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                                        <thead>
+                                          <tr>
+                                            {['Data', 'Hora', 'Título', 'Cliente', 'Observações', 'Status', 'Ativação', ''].map(h => (
+                                              <th key={h} style={{ padding: '7px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700,
+                                                color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em',
+                                                borderBottom: '1px solid var(--border)', background: 'var(--bg-card)', whiteSpace: 'nowrap' }}>{h}</th>
+                                            ))}
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {c.calls.map((row, i) => (
+                                            <tr key={i} style={{ background: i % 2 === 0 ? 'var(--bg-card2)' : 'var(--bg-card)' }}>
+                                              <td style={{ padding: '7px 14px', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>
+                                                {new Date(row.date + 'T12:00:00').toLocaleDateString('pt-BR')}
+                                              </td>
+                                              <td style={{ padding: '7px 14px', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{row.time}</td>
+                                              <td style={{ padding: '7px 14px', borderBottom: '1px solid var(--border)', fontWeight: 600, maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.title}</td>
+                                              <td style={{ padding: '7px 14px', borderBottom: '1px solid var(--border)', color: 'var(--text2)', maxWidth: 160, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                {row.client_email || '—'}
+                                              </td>
+                                              <td style={{ padding: '7px 14px', borderBottom: '1px solid var(--border)', color: 'var(--text2)', maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={row.notes}>
+                                                {row.notes || '—'}
+                                              </td>
+                                              <td style={{ padding: '7px 14px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                                                <span style={{
+                                                  background: `color-mix(in srgb, ${CALL_STATUS_COLORS[row.status] || 'var(--text2)'} 15%, var(--bg-card2))`,
+                                                  color: CALL_STATUS_COLORS[row.status] || 'var(--text2)',
+                                                  border: `1px solid ${CALL_STATUS_COLORS[row.status] || 'var(--border)'}`,
+                                                  borderRadius: 20, padding: '2px 9px', fontSize: 10, fontWeight: 700,
+                                                }}>{row.status}</span>
+                                              </td>
+                                              <td style={{ padding: '7px 14px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                                                {row.ativado === null ? (
+                                                  <span style={{ color: 'var(--text2)', fontSize: 10 }}>—</span>
+                                                ) : row.ativado ? (
+                                                  <span style={{ background: 'color-mix(in srgb, var(--green) 15%, var(--bg-card2))', color: 'var(--green)', border: '1px solid var(--green)', borderRadius: 20, padding: '2px 9px', fontSize: 10, fontWeight: 700 }}>Ativado</span>
+                                                ) : (
+                                                  <span title={row.motivo_nao_ativacao || ''} style={{ background: 'color-mix(in srgb, var(--red) 15%, var(--bg-card2))', color: 'var(--red)', border: '1px solid var(--red)', borderRadius: 20, padding: '2px 9px', fontSize: 10, fontWeight: 700, cursor: row.motivo_nao_ativacao ? 'help' : 'default' }}>
+                                                    Não Ativado{row.motivo_nao_ativacao ? ' ⓘ' : ''}
+                                                  </span>
+                                                )}
+                                              </td>
+                                              {/* Botões de ativação — apenas para calls não arquivadas */}
+                                              <td style={{ padding: '7px 14px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                                                {row.source === 'calls' ? (
+                                                  <div style={{ display: 'flex', gap: 4 }}>
+                                                    <button disabled={savingId === row.id}
+                                                      onClick={() => updateCallAtivacao(row.id, true)}
+                                                      style={{
+                                                        padding: '3px 8px', borderRadius: 6,
+                                                        border: `1px solid ${row.ativado === true ? 'var(--green)' : 'var(--border)'}`,
+                                                        background: row.ativado === true ? 'color-mix(in srgb, var(--green) 20%, var(--bg-card2))' : 'var(--bg-card)',
+                                                        color: row.ativado === true ? 'var(--green)' : 'var(--text2)',
+                                                        fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                                                        fontFamily: 'inherit', opacity: savingId === row.id ? 0.5 : 1,
+                                                      }}>Ativado</button>
+                                                    <button disabled={savingId === row.id}
+                                                      onClick={() => updateCallAtivacao(row.id, false)}
+                                                      style={{
+                                                        padding: '3px 8px', borderRadius: 6,
+                                                        border: `1px solid ${row.ativado === false ? 'var(--red)' : 'var(--border)'}`,
+                                                        background: row.ativado === false ? 'color-mix(in srgb, var(--red) 20%, var(--bg-card2))' : 'var(--bg-card)',
+                                                        color: row.ativado === false ? 'var(--red)' : 'var(--text2)',
+                                                        fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                                                        fontFamily: 'inherit', opacity: savingId === row.id ? 0.5 : 1,
+                                                      }}>Não Ativado</button>
+                                                  </div>
+                                                ) : (
+                                                  <span style={{ color: 'var(--text2)', fontSize: 10 }}>arquivada</span>
+                                                )}
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </>
+                      )}
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </>
+  )
+}
