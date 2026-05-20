@@ -132,7 +132,7 @@ function ResponsaveisContent({ isAdmin }: { isAdmin: boolean }) {
 
   const filtered = users.filter(u => {
     const q = search.toLowerCase();
-    return (!q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
+    return (!q || u.name.toLowerCase().includes(q) || (u.email ?? '').toLowerCase().includes(q))
       && (!filterRole || u.role === filterRole);
   });
   const filteredCommercial = filtered.filter(u => COMMERCIAL_ROLES.includes(u.role));
