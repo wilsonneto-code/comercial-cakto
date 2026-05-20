@@ -27,7 +27,7 @@ type GcClient   = { id: string; client: string; email: string; phone: string | n
 type CarteiraNota = { email: string; motivo: string | null; proxima_acao: string | null; data_contato: string | null }
 
 const MODULES = [
-  { key: 'responsaveis', label: 'Responsáveis',  Icon: Users,          color: 'var(--action)',  desc: 'Gerencie colaboradores e times'     },
+  { key: 'responsaveis', label: 'Responsáveis',  Icon: Users,          color: 'var(--cyan)',    desc: 'Gerencie colaboradores e times'     },
   { key: 'ativacoes',    label: 'Ativações',      Icon: Zap,            color: 'var(--purple)',  desc: 'Controle de clientes ativados'      },
   { key: 'ranking',      label: 'Ranking',        Icon: Trophy,         color: 'var(--gold)',    desc: 'Performance e classificação'        },
   { key: 'formularios',  label: 'Formulários',    Icon: FileText,       color: 'var(--green)',   desc: 'Formulários e respostas'            },

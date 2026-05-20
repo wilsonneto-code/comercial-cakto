@@ -94,7 +94,6 @@ function DashboardsContent() {
   const timeCards = [
     { num: '01', color: '#F59E0B' },
     { num: '02', color: '#22C55E' },
-    { num: '03', color: '#A78BFA' },
   ];
 
   const lifetimeCard = { title: 'Dashboard Lifetime', desc: 'TPV total de clientes pós 30 dias de ativação.', color: '#22D3EE', path: '/dashboard/lifetime' };

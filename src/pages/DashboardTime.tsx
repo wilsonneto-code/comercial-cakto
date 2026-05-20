@@ -23,7 +23,7 @@ import {
   type ClienteAtivo,
 } from '../services/tpvClientesService'
 
-const TIMES = ['01', '02', '03']
+const TIMES = ['01', '02']
 const BRL = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 
@@ -443,21 +443,7 @@ function DashboardTimeContent({ timeNum, userRole }: { timeNum: string; userRole
 
       </div>
 
-      {/* ── Metabase — Time 03 ───────────────────────────────────────── */}
-      {timeNum === '03' && (
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
-          <div style={{ padding: '16px 20px', fontWeight: 700, fontSize: 14, borderBottom: '1px solid var(--border)' }}>
-            📊 Soma das Declarações — Isaac
-          </div>
-          <iframe
-            src="https://team.cakto.app/question/2017-soma-das-declaracoes-r-isaac"
-            style={{ width: '100%', height: 500, border: 'none', display: 'block' }}
-            allowFullScreen
-          />
-        </div>
-      )}
-
-      {/* ── Modal Editar ─────────────────────────────────────────────── */}
+{/* ── Modal Editar ─────────────────────────────────────────────── */}
       <Modal open={!!modalEditar} onClose={() => setModalEditar(null)} title="Editar Cliente">
         {modalEditar && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
