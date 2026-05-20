@@ -35,7 +35,7 @@ type DbTeam = {
   name: string
 }
 
-const ROLES: UserRole[] = ['SDR', 'Closer', 'Gerente de Contas', 'Head Comercial', 'Colaborador', 'Admin'];
+const ROLES: UserRole[] = ['SDR', 'Closer', 'Gerente de Contas', 'Head Comercial', 'Sócio', 'Colaborador', 'Admin'];
 
 export default function ResponsaveisPage() {
   const { user, loading } = useAuth();

@@ -8,6 +8,7 @@ export type Json =
 
 export type UserRole =
   | 'Admin'
+  | 'Sócio'
   | 'Head Comercial'
   | 'Gerente de Contas'
   | 'Closer'

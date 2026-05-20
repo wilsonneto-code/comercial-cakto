@@ -41,6 +41,7 @@ export function clamp(v: number, min: number, max: number) {
 }
 
 export const ROLE_COLORS: Record<string, string> = {
+  'Sócio':             'var(--gold)',
   'Closer':            'var(--purple)',
   'SDR':               'var(--action)',
   'Gerente de Contas': 'var(--orange)',
