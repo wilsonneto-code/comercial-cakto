@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Avatar } from '@/components/ui/Avatar'
 import { supabase } from '@/lib/supabase/client'
 import { BarChartH } from '@/components/ui/charts/BarChartH'
+import { BarChartV } from '@/components/ui/charts/BarChartV'
 import { LineAreaChart } from '@/components/ui/charts/LineAreaChart'
 import { DonutChart } from '@/components/ui/charts/DonutChart'
 import { ChevronLeft, RefreshCw, Loader2, Users, Zap, Phone, TrendingUp } from 'lucide-react'
@@ -330,14 +331,14 @@ function TabGeral({ activations, calls, users, inicio, fim, card, lbl }: any) {
         <div style={{ ...card, padding: 20 }}>
           {lbl('Ativações por dia')}
           {days.length > 1
-            ? <LineAreaChart data={days} height={130} color={COR.roxo} valueKey="value" labelKey="label" />
+            ? <BarChartV data={days} labelKey="label" valueKey="value" color={COR.roxo} height={130} />
             : <div style={{ height: 130, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text2)', fontSize: 13 }}>Selecione um período maior</div>
           }
         </div>
         <div style={{ ...card, padding: 20 }}>
           {lbl('Calls por dia')}
           {callDays.length > 1
-            ? <LineAreaChart data={callDays} height={130} color={COR.azul} valueKey="value" labelKey="label" />
+            ? <BarChartV data={callDays} labelKey="label" valueKey="value" color={COR.azul} height={130} />
             : <div style={{ height: 130, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text2)', fontSize: 13 }}>Selecione um período maior</div>
           }
         </div>
