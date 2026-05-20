@@ -116,7 +116,7 @@ function DashboardTimeContent({ timeNum, userRole }: { timeNum: string; userRole
   async function sincronizar() {
     setSincronizando(true)
     await Promise.all([
-      supabase.functions.invoke('calcular-tpv', { body: { limite: 500 } }),
+      supabase.functions.invoke('calcular-tpv', { body: { limite: 30 } }),
       sincronizarClientesDoTime(timeNum),
     ])
     const dados = await getClientesAtivos(timeNum)

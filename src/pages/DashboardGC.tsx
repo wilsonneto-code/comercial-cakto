@@ -108,7 +108,7 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
 
   const refresh = async () => {
     setIsRefresh(true)
-    await supabase.functions.invoke('calcular-tpv', { body: { limite: 500 } })
+    await supabase.functions.invoke('calcular-tpv', { body: { limite: 30 } })
     await Promise.all([load(), loadDailyTpv()])
     setIsRefresh(false)
   }
