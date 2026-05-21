@@ -22,6 +22,7 @@ interface CarteiraCli {
   email: string
   telefone: string
   faturamento: number
+  tpv_30d: number | null
   tpv_mes: number | null
   tpv_total: number | null
   ultima_venda: string | null
@@ -164,8 +165,13 @@ function CarteirasContent() {
 
   const gerentes = [...new Set(clientes.map(c => c.gerente))].sort()
 
+  const getTpvPeriodo = (c: CarteiraCli) =>
+    filterPeriodo === '30d' ? (c.tpv_30d ?? 0) : (c.tpv_mes ?? 0)
+
   const getPct = (c: CarteiraCli) =>
-    c.previsao_faturamento > 0 ? (c.tpv_mes ?? 0) / c.previsao_faturamento * 100 : null
+    c.previsao_faturamento > 0 ? getTpvPeriodo(c) / c.previsao_faturamento * 100 : null
+
+  const tpvColLabel = filterPeriodo === '30d' ? 'TPV 30d' : 'TPV Mês'
 
   const getPctColor = (pct: number | null) =>
     pct === null ? null : pct >= 80 ? 'verde' : pct >= 50 ? 'amarelo' : pct >= 20 ? 'vermelho' : 'critico'
@@ -204,7 +210,7 @@ function CarteirasContent() {
     })
     .sort((a, b) => {
       if (sort === 'nome')      return a.nome.localeCompare(b.nome)
-      if (sort === 'tpv')       return (b.tpv_mes ?? 0) - (a.tpv_mes ?? 0)
+      if (sort === 'tpv')       return getTpvPeriodo(b) - getTpvPeriodo(a)
       if (sort === 'tpv_total') return (b.tpv_total ?? 0) - (a.tpv_total ?? 0)
       if (sort === 'pct')       return (getPct(b) ?? -1) - (getPct(a) ?? -1)
       return b.faturamento - a.faturamento
@@ -410,7 +416,7 @@ function CarteirasContent() {
                     { label: 'Gerente',      align: 'left'  },
                     { label: 'TPV Total',    align: 'right' },
                     { label: 'Prev. Fat.',   align: 'right' },
-                    { label: 'TPV Mês',      align: 'right' },
+                    { label: tpvColLabel,    align: 'right' },
                     { label: '% Atingido',   align: 'center'},
                     { label: 'Últ. Venda',   align: 'left'  },
                     { label: '',             align: 'left'  },
@@ -452,7 +458,7 @@ function CarteirasContent() {
                       {c.previsao_faturamento > 0 ? BRL(c.previsao_faturamento) : <span style={{ color: 'var(--text2)' }}>—</span>}
                     </td>
                     <td style={{ padding: '12px 16px', textAlign: 'right', color: '#34C759', fontWeight: 700, fontSize: 13 }}>
-                      {c.tpv_mes ? BRL(c.tpv_mes) : <span style={{ color: 'var(--text2)' }}>—</span>}
+                      {getTpvPeriodo(c) > 0 ? BRL(getTpvPeriodo(c)) : <span style={{ color: 'var(--text2)' }}>—</span>}
                     </td>
                     <td style={{ padding: '12px 16px', textAlign: 'center' }}>
                       {pctChip(getPct(c))}

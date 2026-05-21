@@ -579,6 +579,7 @@ serve(async (req) => {
     email:                r[2],
     telefone:             r[3],
     faturamento:          Number(r[4] ?? 0),
+    tpv_30d:              Number(r[4] ?? 0),
     tpv_mes:              Number(r[5] ?? 0),
     ultima_venda:         r[6],
     previsao_faturamento: Number(r[7] ?? 0),
