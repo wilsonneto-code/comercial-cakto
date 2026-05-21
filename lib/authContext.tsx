@@ -127,7 +127,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        if (event === 'TOKEN_REFRESHED') return;
+        // Só re-busca o perfil em eventos de início de sessão.
+        // TOKEN_REFRESHED, USER_UPDATED e outros não devem sobrescrever o perfil já carregado.
+        const shouldFetch = event === 'SIGNED_IN' || event === 'INITIAL_SESSION';
+        if (!shouldFetch) {
+          if (event === 'SIGNED_OUT') {
+            if (mounted) { setUser(null); setLoading(false); }
+          }
+          return;
+        }
         if (!session?.user) {
           if (mounted) { setUser(null); setLoading(false); }
           return;
