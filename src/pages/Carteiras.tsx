@@ -70,6 +70,7 @@ function CarteirasContent() {
   const [sort, setSort]               = useState<'faturamento' | 'tpv' | 'nome' | 'pct' | 'tpv_total'>('pct')
   const [filterPct, setFilterPct]     = useState<'todos' | 'verde' | 'amarelo' | 'vermelho' | 'critico'>('todos')
   const [filterTpvTotal, setFilterTpvTotal] = useState<'todos' | '100k' | '500k' | '1m' | '2m'>('todos')
+  const [filterPeriodo, setFilterPeriodo]   = useState<'todos' | 'mes' | '30d'>('todos')
   const [modalCli, setModalCli]       = useState<CarteiraCli | null>(null)
   const [notaForm, setNotaForm]       = useState<Omit<Nota,'email'>>({ motivo: '', observacao: '', proxima_acao: '', data_contato: '' })
   const [isSaving, setIsSaving]       = useState(false)
@@ -185,6 +186,20 @@ function CarteirasContent() {
       if (filterTpvTotal === '500k') return t >= 500_000
       if (filterTpvTotal === '1m')   return t >= 1_000_000
       if (filterTpvTotal === '2m')   return t >= 2_000_000
+      return true
+    })
+    .filter(c => {
+      if (filterPeriodo === 'todos') return true
+      if (!c.ultima_venda) return false
+      const venda = new Date(c.ultima_venda)
+      if (filterPeriodo === 'mes') {
+        const hoje = new Date()
+        return venda.getFullYear() === hoje.getFullYear() && venda.getMonth() === hoje.getMonth()
+      }
+      if (filterPeriodo === '30d') {
+        const limite = new Date(); limite.setDate(limite.getDate() - 30)
+        return venda >= limite
+      }
       return true
     })
     .sort((a, b) => {
@@ -325,6 +340,22 @@ function CarteirasContent() {
               border: `1px solid ${filterPct === v ? border : 'var(--border)'}`,
               background: filterPct === v ? bg : 'transparent',
               color: filterPct === v ? fg : 'var(--text2)',
+              transition: 'all .15s',
+            }}>{label}</button>
+          ))}
+
+          {/* Período */}
+          <div style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 4px' }} />
+          {([
+            { v: 'todos', label: 'Todos os períodos' },
+            { v: 'mes',   label: 'Mês atual'         },
+            { v: '30d',   label: 'Últimos 30 dias'   },
+          ] as const).map(({ v, label }) => (
+            <button key={v} onClick={() => setFilterPeriodo(v)} style={{
+              padding: '6px 12px', borderRadius: 20, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
+              border: `1px solid ${filterPeriodo === v ? '#F59E0B' : 'var(--border)'}`,
+              background: filterPeriodo === v ? '#F59E0B' : 'transparent',
+              color: filterPeriodo === v ? '#000' : 'var(--text2)',
               transition: 'all .15s',
             }}>{label}</button>
           ))}
