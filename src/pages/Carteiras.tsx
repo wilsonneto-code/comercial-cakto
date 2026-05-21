@@ -67,8 +67,9 @@ function CarteirasContent() {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [search, setSearch]           = useState('')
   const [filterCart, setFilterCart]   = useState('todas')
-  const [sort, setSort]               = useState<'faturamento' | 'tpv' | 'nome' | 'pct'>('pct')
+  const [sort, setSort]               = useState<'faturamento' | 'tpv' | 'nome' | 'pct' | 'tpv_total'>('pct')
   const [filterPct, setFilterPct]     = useState<'todos' | 'verde' | 'amarelo' | 'vermelho' | 'critico'>('todos')
+  const [filterTpvTotal, setFilterTpvTotal] = useState<'todos' | '100k' | '500k' | '1m' | '2m'>('todos')
   const [modalCli, setModalCli]       = useState<CarteiraCli | null>(null)
   const [notaForm, setNotaForm]       = useState<Omit<Nota,'email'>>({ motivo: '', observacao: '', proxima_acao: '', data_contato: '' })
   const [isSaving, setIsSaving]       = useState(false)
@@ -178,10 +179,19 @@ function CarteirasContent() {
       const q = search.toLowerCase()
       return !q || c.nome?.toLowerCase().includes(q) || c.email?.toLowerCase().includes(q)
     })
+    .filter(c => {
+      const t = c.tpv_total ?? 0
+      if (filterTpvTotal === '100k') return t >= 100_000
+      if (filterTpvTotal === '500k') return t >= 500_000
+      if (filterTpvTotal === '1m')   return t >= 1_000_000
+      if (filterTpvTotal === '2m')   return t >= 2_000_000
+      return true
+    })
     .sort((a, b) => {
-      if (sort === 'nome') return a.nome.localeCompare(b.nome)
-      if (sort === 'tpv')  return (b.tpv_mes ?? 0) - (a.tpv_mes ?? 0)
-      if (sort === 'pct')  return (getPct(b) ?? -1) - (getPct(a) ?? -1)
+      if (sort === 'nome')      return a.nome.localeCompare(b.nome)
+      if (sort === 'tpv')       return (b.tpv_mes ?? 0) - (a.tpv_mes ?? 0)
+      if (sort === 'tpv_total') return (b.tpv_total ?? 0) - (a.tpv_total ?? 0)
+      if (sort === 'pct')       return (getPct(b) ?? -1) - (getPct(a) ?? -1)
       return b.faturamento - a.faturamento
     })
 
@@ -325,9 +335,17 @@ function CarteirasContent() {
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..."
                 style={{ ...inp, paddingLeft: 30, width: 180 }} />
             </div>
+            <select value={filterTpvTotal} onChange={e => setFilterTpvTotal(e.target.value as any)} style={{ ...inp, cursor: 'pointer', color: filterTpvTotal !== 'todos' ? '#F59E0B' : undefined, fontWeight: filterTpvTotal !== 'todos' ? 700 : undefined }}>
+              <option value="todos">TPV Total: Todos</option>
+              <option value="100k">TPV Total ≥ R$ 100k</option>
+              <option value="500k">TPV Total ≥ R$ 500k</option>
+              <option value="1m">TPV Total ≥ R$ 1M</option>
+              <option value="2m">TPV Total ≥ R$ 2M</option>
+            </select>
             <select value={sort} onChange={e => setSort(e.target.value as any)} style={{ ...inp, cursor: 'pointer' }}>
               <option value="pct">↓ % Atingido</option>
               <option value="tpv">↓ TPV mês</option>
+              <option value="tpv_total">↓ TPV Total</option>
               <option value="nome">A→Z Nome</option>
             </select>
 
