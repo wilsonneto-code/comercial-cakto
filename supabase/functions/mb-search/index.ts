@@ -495,7 +495,8 @@ serve(async (req) => {
         COALESCE(pmt.tpv_30d, 0) AS faturamento_base,
         COALESCE(pmt.tpv_mes, 0) AS tpv_mes,
         pmt.ultima_venda,
-        COALESCE(p."estimated_revenue", 0) AS previsao_faturamento
+        COALESCE(p."estimated_revenue", 0) AS previsao_faturamento,
+        COALESCE(pmt.tpv_total, 0) AS tpv_total
       FROM "public"."user_userportfolio" p
       JOIN "public"."user_user" u ON u."id" = p."user_id"
       LEFT JOIN (
@@ -504,6 +505,7 @@ serve(async (req) => {
             AND "createdAt" >= CURRENT_DATE - INTERVAL '30 days') AS tpv_30d,
           SUM("liquidAmount") FILTER (WHERE "status" = 'paid'
             AND "createdAt" >= date_trunc('month', current_date)) AS tpv_mes,
+          SUM("liquidAmount") FILTER (WHERE "status" = 'paid') AS tpv_total,
           MAX("createdAt") FILTER (WHERE "status" = 'paid') AS ultima_venda
         FROM "public"."payment_payment"
         GROUP BY "user_id"
@@ -525,6 +527,7 @@ serve(async (req) => {
     if (allEmails.length > 0) {
       const BATCH = 400
       const caktoMap: Record<string, number> = {}
+      const caktoTotalMap: Record<string, number> = {}
 
       for (let i = 0; i < allEmails.length; i += BATCH) {
         const batch    = allEmails.slice(i, i + BATCH)
@@ -535,7 +538,8 @@ serve(async (req) => {
             COALESCE(SUM(gs."totalAmount") FILTER (
               WHERE go."status" = 'paid'
                 AND DATE_TRUNC('month', gs."createdAt") = DATE_TRUNC('month', CURRENT_DATE)
-            ), 0) AS tpv_mes
+            ), 0) AS tpv_mes,
+            COALESCE(SUM(gs."totalAmount") FILTER (WHERE go."status" = 'paid'), 0) AS tpv_total
           FROM "public"."user_user" u
           JOIN "public"."gateway_split" gs ON gs."user_id" = u."id"
           JOIN "public"."gateway_order" go ON go."id" = gs."order_id"
@@ -550,17 +554,19 @@ serve(async (req) => {
 
         ;(res?.data?.rows ?? []).forEach((r: any[]) => {
           if (r[0]) caktoMap[r[0].toLowerCase()] = Number(r[1] ?? 0)
+          if (r[0]) caktoTotalMap[r[0].toLowerCase()] = Number(r[2] ?? 0)
         })
       }
 
       allRows = allRows.map(r => {
-        const email    = (r[2] ?? '').toLowerCase()
-        const splitTpv = Number(r[5] ?? 0)
-        const caktoTpv = caktoMap[email] ?? 0
-        const bestTpv  = Math.max(splitTpv, caktoTpv)
-        return bestTpv !== splitTpv
-          ? [r[0], r[1], r[2], r[3], r[4], bestTpv, r[6], r[7]]
-          : r
+        const email     = (r[2] ?? '').toLowerCase()
+        const splitTpv  = Number(r[5] ?? 0)
+        const caktoTpv  = caktoMap[email] ?? 0
+        const bestTpv   = Math.max(splitTpv, caktoTpv)
+        const splitTotal = Number(r[8] ?? 0)
+        const caktoTotal = caktoTotalMap[email] ?? 0
+        const bestTotal  = Math.max(splitTotal, caktoTotal)
+        return [r[0], r[1], r[2], r[3], r[4], bestTpv, r[6], r[7], bestTotal]
       })
     }
   } catch (_) {
@@ -576,6 +582,7 @@ serve(async (req) => {
     tpv_mes:              Number(r[5] ?? 0),
     ultima_venda:         r[6],
     previsao_faturamento: Number(r[7] ?? 0),
+    tpv_total:            Number(r[8] ?? 0),
   }))
 
   return json({ clientes, total: clientes.length })

@@ -23,6 +23,7 @@ interface CarteiraCli {
   telefone: string
   faturamento: number
   tpv_mes: number | null
+  tpv_total: number | null
   ultima_venda: string | null
   previsao_faturamento: number
 }
@@ -360,6 +361,7 @@ function CarteirasContent() {
                     { label: 'Gerente',      align: 'left'  },
                     { label: 'Prev. Fat.',   align: 'right' },
                     { label: 'TPV Mês',      align: 'right' },
+                    { label: 'TPV Total',    align: 'right' },
                     { label: '% Atingido',   align: 'center'},
                     { label: 'Últ. Venda',   align: 'left'  },
                     { label: '',             align: 'left'  },
@@ -399,6 +401,9 @@ function CarteirasContent() {
                     </td>
                     <td style={{ padding: '12px 16px', textAlign: 'right', color: '#34C759', fontWeight: 700, fontSize: 13 }}>
                       {c.tpv_mes ? BRL(c.tpv_mes) : <span style={{ color: 'var(--text2)' }}>—</span>}
+                    </td>
+                    <td style={{ padding: '12px 16px', textAlign: 'right', color: '#2997FF', fontWeight: 700, fontSize: 13 }}>
+                      {c.tpv_total ? BRL(c.tpv_total) : <span style={{ color: 'var(--text2)' }}>—</span>}
                     </td>
                     <td style={{ padding: '12px 16px', textAlign: 'center' }}>
                       {pctChip(getPct(c))}
