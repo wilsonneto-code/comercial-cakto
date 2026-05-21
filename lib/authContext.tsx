@@ -93,7 +93,8 @@ async function fetchProfile(authUser: SupabaseAuthUser): Promise<User> {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser]       = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const fetchingRef = useRef(false);
+  const fetchingRef   = useRef(false);
+  const loadedAuthId  = useRef<string | null>(null); // auth UID já carregado
 
   const signIn = useCallback(async (email: string, password: string) => {
     try {
@@ -115,6 +116,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    loadedAuthId.current = null;
     await supabase.auth.signOut();
     setUser(null);
   }, []);
@@ -127,24 +129,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        // Só re-busca o perfil em eventos de início de sessão.
-        // TOKEN_REFRESHED, USER_UPDATED e outros não devem sobrescrever o perfil já carregado.
-        const shouldFetch = event === 'SIGNED_IN' || event === 'INITIAL_SESSION';
-        if (!shouldFetch) {
-          if (event === 'SIGNED_OUT') {
-            if (mounted) { setUser(null); setLoading(false); }
-          }
+        if (event === 'SIGNED_OUT') {
+          loadedAuthId.current = null;
+          if (mounted) { setUser(null); setLoading(false); }
           return;
         }
+
         if (!session?.user) {
           if (mounted) { setUser(null); setLoading(false); }
           return;
         }
+
+        // Se já temos o perfil deste auth UID carregado, não sobrescreve.
+        // Evita que TOKEN_REFRESHED ou SIGNED_IN duplicado apague o role correto.
+        if (loadedAuthId.current === session.user.id) {
+          if (mounted) setLoading(false);
+          return;
+        }
+
         if (fetchingRef.current) return;
         fetchingRef.current = true;
         try {
           const profile = await fetchProfile(session.user);
-          if (mounted) setUser(profile);
+          if (mounted) {
+            setUser(profile);
+            loadedAuthId.current = session.user.id;
+          }
         } catch (err) {
           if (mounted) setUser(null);
         } finally {
