@@ -359,9 +359,9 @@ function CarteirasContent() {
                     { label: 'Cliente',      align: 'left'  },
                     { label: 'Contato',      align: 'left'  },
                     { label: 'Gerente',      align: 'left'  },
+                    { label: 'TPV Total',    align: 'right' },
                     { label: 'Prev. Fat.',   align: 'right' },
                     { label: 'TPV Mês',      align: 'right' },
-                    { label: 'TPV Total',    align: 'right' },
                     { label: '% Atingido',   align: 'center'},
                     { label: 'Últ. Venda',   align: 'left'  },
                     { label: '',             align: 'left'  },
@@ -396,14 +396,14 @@ function CarteirasContent() {
                         {c.gerente}
                       </span>
                     </td>
+                    <td style={{ padding: '12px 16px', textAlign: 'right', color: '#F59E0B', fontWeight: 700, fontSize: 13 }}>
+                      {c.tpv_total ? BRL(c.tpv_total) : <span style={{ color: 'var(--text2)' }}>—</span>}
+                    </td>
                     <td style={{ padding: '12px 16px', textAlign: 'right', color: '#BF5AF2', fontWeight: 700, fontSize: 13 }}>
                       {c.previsao_faturamento > 0 ? BRL(c.previsao_faturamento) : <span style={{ color: 'var(--text2)' }}>—</span>}
                     </td>
                     <td style={{ padding: '12px 16px', textAlign: 'right', color: '#34C759', fontWeight: 700, fontSize: 13 }}>
                       {c.tpv_mes ? BRL(c.tpv_mes) : <span style={{ color: 'var(--text2)' }}>—</span>}
-                    </td>
-                    <td style={{ padding: '12px 16px', textAlign: 'right', color: '#2997FF', fontWeight: 700, fontSize: 13 }}>
-                      {c.tpv_total ? BRL(c.tpv_total) : <span style={{ color: 'var(--text2)' }}>—</span>}
                     </td>
                     <td style={{ padding: '12px 16px', textAlign: 'center' }}>
                       {pctChip(getPct(c))}
