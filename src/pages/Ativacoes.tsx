@@ -271,12 +271,13 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
           supabase.auth.getSession().then(({ data: { session } }) => {
             void supabase.functions.invoke('sync-datacrazy', {
               body: {
-                name:       capitalize(form.client),
-                email:      form.email,
-                phone:      form.phone || null,
-                team_uuid:  responsibleUser.team_id,
-                notes:      form.notes || null,
-                image_urls: imageUrls,
+                name:               capitalize(form.client),
+                email:              form.email,
+                phone:              form.phone || null,
+                team_uuid:          responsibleUser.team_id,
+                notes:              form.notes || null,
+                image_urls:         imageUrls,
+                faturamento_mensal: form.faturamento_mensal ? parseFloat(form.faturamento_mensal) || null : null,
               },
               headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined,
             })
@@ -379,12 +380,13 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
         // Sincroniza lead e card no DataCrazy CRM
         void supabase.functions.invoke('sync-datacrazy', {
           body: {
-            name:       capitalize(form.client),
-            email:      form.email,
-            phone:      form.phone || null,
-            team_uuid:  responsibleUser.team_id,
-            notes:      form.notes || null,
-            image_urls: imageUrls,
+            name:               capitalize(form.client),
+            email:              form.email,
+            phone:              form.phone || null,
+            team_uuid:          responsibleUser.team_id,
+            notes:              form.notes || null,
+            image_urls:         imageUrls,
+            faturamento_mensal: form.faturamento_mensal ? parseFloat(form.faturamento_mensal) || null : null,
           },
           headers: authHeaders,
         })

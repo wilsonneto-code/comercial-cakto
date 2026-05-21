@@ -44,7 +44,7 @@ serve(async (req) => {
     new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } })
 
   try {
-    const { name, email, phone, team_uuid, notes, image_urls } = await req.json()
+    const { name, email, phone, team_uuid, notes, image_urls, faturamento_mensal } = await req.json()
 
     // Busca API Key nas configurações do Supabase
     const supabase = createClient(
@@ -182,6 +182,56 @@ serve(async (req) => {
           body: JSON.stringify({ attachmentUrl: url, fileName, fileSize }),
         })
         console.log(`[sync-datacrazy] Arquivo enviado: ${fileName} | status: ${attRes.status}`)
+      }
+    }
+
+    // ── 7. Cria negócio no funil GC (Starter / Growth / Enterprise) ─────────
+    if (faturamento_mensal != null && leadId) {
+      try {
+        const fat = Number(faturamento_mensal)
+        const gcFunnelName = fat <= 50000 ? 'GC Starter' : fat <= 250000 ? 'GC Growth' : 'GC Enterprise'
+
+        // Busca todos os pipelines e encontra o funil GC pelo nome
+        const pipRes = await fetch(`${BASE}/pipelines?take=100`, { headers: h })
+        const pipData = await pipRes.json()
+        const gcPipeline = (pipData.data ?? pipData ?? []).find(
+          (p: any) => p.name?.toLowerCase().includes(gcFunnelName.toLowerCase())
+        )
+
+        if (gcPipeline) {
+          // Pega o primeiro stage do funil GC
+          const stagesRes = await fetch(`${BASE}/pipelines/${gcPipeline.id}/stages?take=50`, { headers: h })
+          const stagesData = await stagesRes.json()
+          const stages = stagesData.data ?? stagesData ?? []
+          const firstStage = stages.sort((a: any, b: any) => (a.position ?? 0) - (b.position ?? 0))[0]
+
+          if (firstStage) {
+            // Verifica se já existe negócio neste funil GC para este lead
+            const gcBizRes = await fetch(`${BASE}/leads/${leadId}/businesses?take=50`, { headers: h })
+            const gcBizData = await gcBizRes.json()
+            const existingGcBiz = (gcBizData.data ?? []).find(
+              (b: any) => b.stage?.pipeline?.id === gcPipeline.id
+            )
+
+            if (existingGcBiz) {
+              console.log(`[sync-datacrazy] Negócio GC já existe em ${gcFunnelName}: ${existingGcBiz.id}`)
+            } else {
+              const createGcRes = await fetch(`${BASE}/businesses`, {
+                method: 'POST', headers: h,
+                body: JSON.stringify({ leadId, stageId: firstStage.id }),
+              })
+              const gcBiz = await createGcRes.json()
+              console.log(`[sync-datacrazy] Negócio criado em ${gcFunnelName}: ${gcBiz?.id} | stage: ${firstStage.name}`)
+            }
+          } else {
+            console.warn(`[sync-datacrazy] Funil ${gcFunnelName} não tem stages`)
+          }
+        } else {
+          console.warn(`[sync-datacrazy] Funil GC não encontrado: "${gcFunnelName}" — verifique o nome no DataCrazy`)
+        }
+      } catch (gcErr) {
+        // Não quebra o fluxo principal se o funil GC falhar
+        console.error('[sync-datacrazy] Erro ao criar negócio GC:', String(gcErr))
       }
     }
 
