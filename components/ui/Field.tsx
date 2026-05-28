@@ -1,5 +1,6 @@
 'use client';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, ChevronDown, Check } from 'lucide-react';
+import { useRef, useState, useEffect } from 'react';
 
 interface FieldProps {
   label?: string;
@@ -40,28 +41,133 @@ interface SelProps {
 }
 
 export function Sel({ value, onChange, options = [], placeholder = 'Selecione...', disabled }: SelProps) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Fecha ao clicar fora
+  useEffect(() => {
+    if (!open) return;
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  // Normaliza opções
+  const normalized = options.map(o =>
+    typeof o === 'string' ? { value: o, label: o } : o
+  );
+
+  // Rótulo da opção selecionada
+  const selected = normalized.find(o => o.value === value);
+  const displayLabel = selected?.label ?? '';
+
   return (
-    <div style={{ position: 'relative' }}>
-      <select
-        className="inp"
-        value={value}
-        onChange={e => onChange(e.target.value)}
+    <div ref={ref} style={{ position: 'relative' }}>
+      {/* Trigger */}
+      <button
+        type="button"
         disabled={disabled}
-        style={{ paddingRight: 36 }}
+        onClick={() => !disabled && setOpen(p => !p)}
+        style={{
+          width: '100%',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+          background: 'var(--bg-card2)',
+          border: `1px solid ${open ? 'var(--action)' : 'var(--border)'}`,
+          boxShadow: open ? '0 0 0 3px var(--action-dim)' : 'none',
+          borderRadius: 10,
+          padding: '10px 12px 10px 14px',
+          color: displayLabel ? 'var(--text)' : 'var(--text2)',
+          fontSize: 14,
+          fontWeight: displayLabel ? 500 : 400,
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          fontFamily: 'inherit',
+          textAlign: 'left',
+          opacity: disabled ? 0.4 : 1,
+          transition: 'border-color .18s, box-shadow .18s',
+        }}
       >
-        {placeholder && <option value="">{placeholder}</option>}
-        {options.map(o =>
-          typeof o === 'string'
-            ? <option key={o} value={o}>{o}</option>
-            : <option key={o.value} value={o.value}>{o.label}</option>
-        )}
-      </select>
-      <div style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
-        <svg xmlns="http://www.w3.org/2000/svg" width={16} height={16} viewBox="0 0 24 24"
-          fill="none" stroke="var(--text2)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-          <path d="m6 9 6 6 6-6"/>
-        </svg>
-      </div>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+          {displayLabel || placeholder}
+        </span>
+        <ChevronDown
+          size={15}
+          color="var(--text2)"
+          style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .18s' }}
+        />
+      </button>
+
+      {/* Dropdown list */}
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border-mid)',
+          borderRadius: 12,
+          boxShadow: '0 12px 40px rgba(0,0,0,.45)',
+          zIndex: 500,
+          maxHeight: 240,
+          overflowY: 'auto',
+          padding: '4px',
+          animation: 'scaleIn .15s cubic-bezier(.22,1,.36,1)',
+        }}>
+          {/* Opção vazia / placeholder */}
+          {placeholder && (
+            <button
+              type="button"
+              onClick={() => { onChange(''); setOpen(false); }}
+              style={{
+                width: '100%', textAlign: 'left',
+                padding: '8px 12px', borderRadius: 8,
+                fontSize: 13.5, fontWeight: 400,
+                color: 'var(--text2)', background: 'transparent',
+                border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                transition: 'background .12s',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-card2)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            >
+              {placeholder}
+            </button>
+          )}
+
+          {normalized.map(o => {
+            const isSelected = o.value === value;
+            return (
+              <button
+                key={o.value}
+                type="button"
+                onClick={() => { onChange(o.value); setOpen(false); }}
+                style={{
+                  width: '100%', textAlign: 'left',
+                  padding: '8px 12px', borderRadius: 8,
+                  fontSize: 13.5, fontWeight: isSelected ? 600 : 400,
+                  color: isSelected ? 'var(--action)' : 'var(--text)',
+                  background: isSelected ? 'var(--action-dim)' : 'transparent',
+                  border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  transition: 'background .12s',
+                }}
+                onMouseEnter={e => {
+                  if (!isSelected) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-card2)';
+                }}
+                onMouseLeave={e => {
+                  if (!isSelected) (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+                }}
+              >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {o.label}
+                </span>
+                {isSelected && <Check size={14} color="var(--action)" style={{ flexShrink: 0 }} />}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
