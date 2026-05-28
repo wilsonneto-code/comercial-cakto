@@ -434,6 +434,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
   }
 
   // ── Form fields (variable — evita unmount no re-render) ───────────────────
+  const responsibleTeamId = users.find(u => u.id === form.responsible)?.team_id ?? null
   const noTeamWarning = form.responsible && !responsibleTeamId
 
   // Bloco de histórico de arquivos já enviados (reutilizado nos dois formulários de edição)
