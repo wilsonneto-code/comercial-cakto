@@ -29,6 +29,7 @@
    Paleta: #0D0D0B · #E2CFB7 · #2F5733
 ══════════════════════════════════════════════════════ */
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --bg:          #0D0D0B;
   --bg-card:     #161613;
   --bg-card2:    #1D1D19;
@@ -60,6 +61,7 @@
    TEMA CLARO — Cakto Cream
 ══════════════════════════════════════════════════════ */
 :root[data-theme="light"] {
+  color-scheme: light;
   --bg:          #F5EEE4;
   --bg-card:     #FFFFFF;
   --bg-card2:    #F0E8DC;
@@ -246,6 +248,10 @@ a { text-decoration: none; color: inherit; }
 .inp::placeholder { color: var(--text2); font-weight: 400; }
 .inp:disabled { opacity: .4; cursor: not-allowed; }
 select.inp { cursor: pointer; appearance: none; }
+select.inp option {
+  background: var(--bg-card2);
+  color: var(--text);
+}
 textarea.inp { resize: vertical; min-height: 80px; }
 
 /* ══════════════════════════════════════════════════════
