@@ -21,6 +21,9 @@
   --font-mono: 'Space Grotesk', 'SF Mono', monospace;
 }
 
+/* Largura da sidebar (controlada via JS ao toggling) */
+:root { --sidebar-w: 56px; }
+
 /* ══════════════════════════════════════════════════════
    TEMA ESCURO — Cakto Forest
    Paleta: #0D0D0B · #E2CFB7 · #2F5733
@@ -401,12 +404,14 @@ textarea.inp { resize: vertical; min-height: 80px; }
    PAGE WRAPPER
 ══════════════════════════════════════════════════════ */
 .page-wrap {
-  max-width: 1240px;
-  margin: 0 auto;
-  padding: 92px 28px 48px;
+  padding-top: 90px;
+  padding-right: 28px;
+  padding-bottom: 48px;
+  padding-left: calc(var(--sidebar-w, 56px) + 24px);
+  transition: padding-left .25s cubic-bezier(.22,1,.36,1);
   position: relative; z-index: 1;
 }
-body.preview-mode .page-wrap { padding-top: 128px; }
+body.preview-mode .page-wrap { padding-top: 126px; }
 
 /* ══════════════════════════════════════════════════════
    CARD HOVER

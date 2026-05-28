@@ -26,6 +26,8 @@ import DashboardTarefasGC from './pages/DashboardTarefasGC'
 import GCTaskAlert from './components/GCTaskAlert'
 import PreviewBanner from './components/PreviewBanner'
 import PlanoCarreira from './pages/PlanoCarreira'
+import { Sidebar } from '../components/Sidebar'
+import { SidebarProvider } from '../lib/sidebarContext'
 
 const MAIN_DOMAINS = [
   'localhost',
@@ -86,7 +88,9 @@ export default function App() {
   }
 
   return (
+    <SidebarProvider>
     <>
+    <Sidebar />
     <Routes>
       {/* ── Public routes ── */}
       <Route path="/login" element={<Login />} />
@@ -121,5 +125,6 @@ export default function App() {
     <GCTaskAlert />
     <PreviewBanner />
     </>
+    </SidebarProvider>
   )
 }

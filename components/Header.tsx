@@ -1,73 +1,21 @@
 import { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { Sun, Moon, ChevronDown, Tag, Settings, LogOut, Leaf } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Sun, Moon, ChevronDown, Tag, Settings, LogOut, Leaf, Menu } from 'lucide-react';
 import { useTheme } from './ui/ThemeProvider';
 import { Avatar } from './ui/Avatar';
 import { Dropdown } from './ui/Dropdown';
-import { useAuth, hasAnyRole } from '@/lib/authContext';
-
-const NAV_ITEMS = [
-  { key: 'responsaveis', label: 'Responsáveis' },
-  { key: 'ativacoes',    label: 'Ativações' },
-  { key: 'ranking',      label: 'Ranking' },
-  { key: 'formularios',  label: 'Formulários' },
-  { key: 'estoque',      label: 'Estoque' },
-  { key: 'agenda',           label: 'Agenda' },
-  { key: 'relatorio-calls',  label: 'Relatório de Calls' },
-  { key: 'dashboards',       label: 'Dashboards' },
-];
+import { useAuth } from '@/lib/authContext';
+import { useSidebar } from '@/lib/sidebarContext';
 
 export function Header() {
   const { user, logout } = useAuth();
   const { dark, toggle } = useTheme();
+  const { toggle: toggleSidebar } = useSidebar();
   const navigate = useNavigate();
-  const { pathname } = useLocation();
   const [ddOpen, setDdOpen] = useState(false);
-
-  const isSocio = hasAnyRole(user, ['Sócio']) && !hasAnyRole(user, ['Admin'])
-  if (isSocio) {
-    var nav = [
-      { key: 'relatorio-calls', label: 'Relatório de Calls' },
-      { key: 'dashboards',      label: 'Dashboards'         },
-      { key: 'metabase',        label: 'MetaBase'           },
-      { key: 'ranking',         label: 'Ranking'            },
-      { key: 'plano-carreira',  label: 'Plano de Carreira'  },
-    ]
-  } else {
-    var nav = [
-      ...NAV_ITEMS,
-      ...(hasAnyRole(user, ['Admin', 'Gerente de Contas']) ? [
-        { key: 'gerente-contas',     label: 'Gerente de Contas' },
-        { key: 'gc-ativacoes',       label: 'GC — Ativações' },
-        { key: 'metabase',           label: 'MetaBase' },
-        { key: 'relatorio-pipeline', label: 'Pipeline' },
-      ] : []),
-      ...(hasAnyRole(user, ['Admin']) ? [
-        { key: 'plano-carreira', label: 'Plano de Carreira' },
-        { key: 'pagamentos',    label: 'Pagamentos'    },
-        { key: 'configuracoes', label: 'Configurações' },
-      ] : [
-        { key: 'pagamentos',    label: 'Pagamentos'    },
-      ]),
-    ]
-  }
 
   const { isPreview } = useAuth();
   const BANNER_H = isPreview ? 36 : 0;
-  const isActive = (key: string) => pathname === `/${key}`;
-
-  const navLinkStyle = (key: string): React.CSSProperties => ({
-    position: 'relative',
-    display: 'flex', alignItems: 'center',
-    padding: '6px 10px',
-    borderRadius: 6,
-    fontSize: 12.5, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
-    color: isActive(key) ? 'var(--text)' : 'var(--text2)',
-    background: 'transparent',
-    transition: 'color .18s',
-    border: 'none', fontFamily: 'inherit',
-    letterSpacing: '-.01em',
-  });
 
   return (
     <header style={{
@@ -75,7 +23,7 @@ export function Header() {
       background: 'var(--header-bg)',
       backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
       borderBottom: '1px solid var(--border)',
-      display: 'flex', alignItems: 'center', padding: '0 24px', gap: 0,
+      display: 'flex', alignItems: 'center', padding: '0 20px', gap: 10,
     }}>
 
       {/* Linha de acento verde no topo */}
@@ -85,23 +33,45 @@ export function Header() {
         opacity: .6,
       }} />
 
+      {/* Botão hamburguer */}
+      <button
+        onClick={toggleSidebar}
+        title="Menu"
+        style={{
+          width: 36, height: 36, borderRadius: 9, flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'var(--bg-card2)', border: '1px solid var(--border)',
+          cursor: 'pointer', color: 'var(--text2)', transition: 'all .18s',
+        }}
+        onMouseEnter={e => {
+          (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border-mid)';
+          (e.currentTarget as HTMLButtonElement).style.color = 'var(--text)';
+        }}
+        onMouseLeave={e => {
+          (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border)';
+          (e.currentTarget as HTMLButtonElement).style.color = 'var(--text2)';
+        }}
+      >
+        <Menu size={16} />
+      </button>
+
       {/* ── Logo ── */}
       <button
         onClick={() => navigate('/')}
         style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'none',
-          border: 'none', cursor: 'pointer', flexShrink: 0, marginRight: 20, padding: '4px 0' }}>
+          border: 'none', cursor: 'pointer', flexShrink: 0, padding: '4px 6px', borderRadius: 8 }}>
         <div style={{
-          width: 32, height: 32, borderRadius: 9,
+          width: 30, height: 30, borderRadius: 8,
           background: 'linear-gradient(145deg, #3D7044 0%, #2F5733 100%)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: '0 2px 12px rgba(47,87,51,.50)',
+          boxShadow: '0 2px 10px rgba(47,87,51,.45)',
           flexShrink: 0,
         }}>
-          <Leaf size={15} color="#E2CFB7" strokeWidth={2.2} />
+          <Leaf size={14} color="#E2CFB7" strokeWidth={2.2} />
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0, lineHeight: 1 }}>
           <span style={{
-            fontSize: 14, fontWeight: 800, letterSpacing: '-.025em',
+            fontSize: 13.5, fontWeight: 800, letterSpacing: '-.025em',
             background: 'linear-gradient(135deg, #E2CFB7 0%, #C4AF98 100%)',
             WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
             backgroundClip: 'text',
@@ -109,7 +79,7 @@ export function Header() {
             Comercial
           </span>
           <span style={{
-            fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase',
+            fontSize: 9.5, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase',
             color: 'var(--action)', marginTop: 1,
           }}>
             Cakto
@@ -117,42 +87,11 @@ export function Header() {
         </div>
       </button>
 
-      {/* Separador */}
-      <div style={{ width: 1, height: 22, background: 'var(--border)', marginRight: 18, flexShrink: 0 }} />
-
-      {/* ── Nav ── */}
-      <nav style={{
-        display: 'flex', alignItems: 'center', gap: 0, flex: 1,
-        overflowX: 'auto', scrollbarWidth: 'none',
-      }}>
-        {nav.map(n => (
-          <button
-            key={n.key}
-            style={navLinkStyle(n.key)}
-            onClick={() => navigate(`/${n.key}`)}
-            onMouseEnter={e => {
-              if (!isActive(n.key)) (e.currentTarget as HTMLButtonElement).style.color = 'var(--text)';
-            }}
-            onMouseLeave={e => {
-              if (!isActive(n.key)) (e.currentTarget as HTMLButtonElement).style.color = 'var(--text2)';
-            }}
-          >
-            {n.label}
-            {/* Indicador ativo */}
-            {isActive(n.key) && (
-              <span style={{
-                position: 'absolute', bottom: -1, left: '50%', transform: 'translateX(-50%)',
-                width: '60%', height: 2, borderRadius: 99,
-                background: 'var(--action)',
-                boxShadow: '0 0 8px var(--action-glow)',
-              }} />
-            )}
-          </button>
-        ))}
-      </nav>
+      {/* Espaço flexível */}
+      <div style={{ flex: 1 }} />
 
       {/* ── Right side ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {/* Theme toggle */}
         <button
           onClick={toggle}
