@@ -27,7 +27,7 @@ type DbActivation = {
   image_urls: string[] | null
   faturamento_mensal: number | null
 }
-type DbUser  = { id: string; name: string; email: string | null; role: string; team_id: string | null }
+type DbUser  = { id: string; name: string; email: string | null; role: string; team_id: string | null; extra_roles: string[] | null }
 type DbTeam  = { id: string; name: string }
 type AuthUser = { id: string; name: string; role: string; team_id: string | null }
 
@@ -139,7 +139,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
           .lte('date', dateRange.endDate)
           .order('date', { ascending: false })
           .order('time', { ascending: false }),
-        supabase.from('users').select('id,name,email,role,team_id').order('name'),
+        supabase.from('users').select('id,name,email,role,extra_roles,team_id').order('name'),
         supabase.from('teams').select('id,name').order('name'),
       ])
       if (ae) toast(ae.message, 'error')
@@ -163,8 +163,8 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
     return tid ? (teams.find(t => t.id === tid)?.name ?? '—') : '—'
   }
 
-  // SDRs disponíveis: qualquer closer pode selecionar qualquer SDR
-  const sdrOptions = users.filter(u => u.role === 'SDR')
+  // SDRs disponíveis: role principal SDR ou SDR em extra_roles (ex: Carlos Eduardo, Geovana)
+  const sdrOptions = users.filter(u => u.role === 'SDR' || u.extra_roles?.includes('SDR'))
   const allSdrs = sdrOptions
 
   // Ranking: computed from the already-filtered activations (respects date range)
