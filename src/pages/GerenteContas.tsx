@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, ChevronLeft, ChevronRight, Video, Trash2, Phone, Calendar, Loader2, CheckCircle, XCircle, Clock, MessageCircle, RefreshCw } from 'lucide-react'
+import { Plus, ChevronLeft, ChevronRight, Video, Trash2, Phone, Calendar, Loader2, CheckCircle, XCircle, Clock, MessageCircle, RefreshCw, ClipboardList, AlertCircle, Database } from 'lucide-react'
 import { useAuth, hasAnyRole } from '@/lib/authContext'
 import { Header } from '@/components/Header'
 import { Avatar } from '@/components/ui/Avatar'
@@ -11,7 +11,8 @@ import { Sheet } from '@/components/ui/Sheet'
 import { Field, Sel } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
 import { supabase } from '@/lib/supabase/client'
-import { getMbClientes, invalidateMbCache } from '@/lib/mbCache'
+import { getMbClientes, getMbTpvByEmails, invalidateMbCache } from '@/lib/mbCache'
+import { avatarColor } from '@/lib/utils'
 
 const DAYS   = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb']
 const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
@@ -119,7 +120,7 @@ function GCContent() {
   const today    = new Date()
   const todayStr = today.toISOString().slice(0,10)
 
-  const [tab, setTab]             = useState<'kanban' | 'funis' | 'agenda'>('kanban')
+  const [tab, setTab]             = useState<'kanban' | 'funis' | 'agenda' | 'tarefas'>('kanban')
   const [gcConnected, setGcConnected] = useState<boolean | null>(null)
   const [users, setUsers]         = useState<DbUser[]>([])
   const [activations, setActs]    = useState<DbActivation[]>([])
@@ -129,6 +130,29 @@ function GCContent() {
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isSaving, setIsSaving]   = useState(false)
+
+  // ── Tasks ──────────────────────────────────────────────────────────────────
+  type GcTask = {
+    id: string; activation_id: string; gerente_id: string
+    client_name: string; client_email: string; phone: string | null
+    tipo: string; title: string | null; gc_tier: string | null
+    due_date: string; status: string; completed_at: string | null
+    completed_by: string | null; notes: string | null
+  }
+  const TASK_LABEL: Record<string, string> = {
+    alterar_taxas:             'Alteração de Taxa',
+    d2_boas_vindas:            'Boas Vindas',
+    d7_incentivo:              'Followup Ativação',
+    d15_manual:                'Acompanhamento Manual',
+    d30_ciclo:                 'Resultado do Faturamento',
+    acompanhamento_quinzenal:  'Acompanhamento Quinzenal',
+    acompanhamento_semanal:    'Acompanhamento Semanal',
+    adicionar_carteira:        'Adicionar na Carteira',
+  }
+  const TIER_COLOR: Record<string, string> = { starter: '#07BA1C', growth: '#2BB9FF', enterprise: '#BF5AF2' }
+  const [tasks,        setTasks]        = useState<GcTask[]>([])
+  const [taskTab,      setTaskTab]      = useState<'pendentes' | 'relatorio'>('pendentes')
+  const [completingId, setCompletingId] = useState<string | null>(null)
 
   // Filtros
   const [filterGerente, setFilterGerente] = useState('')
@@ -149,6 +173,54 @@ function GCContent() {
   // Modal simplificado para agendar reunião direto do card
   const [quickMeetClient, setQuickMeetClient] = useState<DbActivation | null>(null)
   const [quickMeetForm,   setQuickMeetForm]   = useState({ date: '', time: '', endTime: '' })
+
+  // ── Nova Tarefa ──────────────────────────────────────────────────────────
+  const EMPTY_TASK_FORM = { activation_id: '', gerente_id: '', tipo: '', title: '', due_date: '', notes: '' }
+  const [modalNewTask,  setModalNewTask]  = useState(false)
+  const [newTaskForm,   setNewTaskForm]   = useState({ ...EMPTY_TASK_FORM })
+  const [isSavingTask,  setIsSavingTask]  = useState(false)
+
+  // ── Bulk Sync CRM ─────────────────────────────────────────────────────────
+  type BulkSyncResult = {
+    email: string; client: string; tier: string | null; gerente: string
+    faturamento_mensal: number; tpv_mes: number
+    status: 'ok' | 'error' | 'skip'; leadId?: string; leadAction?: string
+    bizAction?: string; bizId?: string; tagAdded?: string; error?: string
+  }
+  type BulkSyncStats = {
+    total: number; ok: number; errors: number; skipped: number
+    leadsCreated: number; bizCreated: number; bizExisting: number
+    starter: number; growth: number; enterprise: number
+    pipelinesFound?: Record<string, string>
+  }
+  const [modalBulkSync,   setModalBulkSync]   = useState(false)
+  const [bulkSyncLoading, setBulkSyncLoading] = useState(false)
+  const [bulkSyncStats,   setBulkSyncStats]   = useState<BulkSyncStats | null>(null)
+  const [bulkSyncResults, setBulkSyncResults] = useState<BulkSyncResult[]>([])
+  const [bulkSyncError,   setBulkSyncError]   = useState<string | null>(null)
+
+  async function syncCRM() {
+    setBulkSyncLoading(true)
+    setBulkSyncStats(null)
+    setBulkSyncResults([])
+    setBulkSyncError(null)
+    try {
+      const { data, error } = await supabase.functions.invoke('bulk-sync-gc', { body: {} })
+      if (error) {
+        let msg = (error as any)?.message ?? 'Erro desconhecido'
+        try { const ctx = (error as any)?.context; if (ctx?.json) { const b = await ctx.json(); msg = b?.error ?? msg } } catch {}
+        setBulkSyncError(msg)
+      } else {
+        setBulkSyncStats((data as any).stats ?? null)
+        setBulkSyncResults((data as any).results ?? [])
+        if ((data as any).success) toast('Sincronização concluída ✓', 'success')
+        else setBulkSyncError((data as any).error ?? 'Erro na sincronização')
+      }
+    } catch (e) {
+      setBulkSyncError(String(e))
+    }
+    setBulkSyncLoading(false)
+  }
 
   // Verifica se o GC atual tem Google Calendar conectado
   useEffect(() => {
@@ -201,14 +273,12 @@ function GCContent() {
       const actsList = (acts || []) as DbActivation[]
       setActs(actsList)
 
-      // Busca TPV: combina portfólio (account_manager_id) + query direta por email
+      // Busca TPV: combina portfólio (account_manager_id) + query direta por email (com cache 4h)
       const emails = actsList.map(a => a.email).filter(Boolean)
       Promise.all([
         getMbClientes(),
-        emails.length > 0
-          ? supabase.functions.invoke('mb-search', { body: { emails } })
-          : Promise.resolve({ data: null }),
-      ]).then(([portfolioClientes, emailRes]) => {
+        getMbTpvByEmails(emails),
+      ]).then(([portfolioClientes, emailTpv]) => {
         const tpv: Record<string, { tpv_mes: number; ultima_venda: string | null }> = {}
 
         // 1. Dados do portfólio
@@ -216,14 +286,12 @@ function GCContent() {
           if (c.email) tpv[c.email.toLowerCase()] = { tpv_mes: c.tpv_mes ?? 0, ultima_venda: c.ultima_venda ?? null }
         })
 
-        // 2. Query direta por email
-        if (emailRes.data?.tpv) {
-          Object.entries(emailRes.data.tpv as Record<string, any>).forEach(([email, val]: [string, any]) => {
-            const existing = tpv[email]
-            if (!existing || val.tpv_mes > existing.tpv_mes)
-              tpv[email] = { tpv_mes: val.tpv_mes ?? 0, ultima_venda: val.ultima_venda ?? null }
-          })
-        }
+        // 2. Query direta por email (cacheada)
+        Object.entries(emailTpv).forEach(([email, val]) => {
+          const existing = tpv[email]
+          if (!existing || val.tpv_mes > existing.tpv_mes)
+            tpv[email] = { tpv_mes: val.tpv_mes ?? 0, ultima_venda: val.ultima_venda ?? null }
+        })
 
         setTpvMap(tpv)
 
@@ -264,27 +332,50 @@ function GCContent() {
     setTpvLoaded(false)
     invalidateMbCache()
     const emails = acts.map(a => a.email).filter(Boolean)
-    const [portfolioClientes, emailRes] = await Promise.all([
+    const [portfolioClientes, emailTpv] = await Promise.all([
       getMbClientes(true),
-      emails.length > 0
-        ? supabase.functions.invoke('mb-search', { body: { emails } })
-        : Promise.resolve({ data: null }),
+      getMbTpvByEmails(emails, true),
     ])
     const tpv: Record<string, { tpv_mes: number; ultima_venda: string | null }> = {}
     ;(portfolioClientes as any[]).forEach(c => {
       if (c.email) tpv[c.email.toLowerCase()] = { tpv_mes: c.tpv_mes ?? 0, ultima_venda: c.ultima_venda ?? null }
     })
-    if (emailRes.data?.tpv) {
-      Object.entries(emailRes.data.tpv as Record<string, any>).forEach(([email, val]: [string, any]) => {
-        const existing = tpv[email]
-        if (!existing || val.tpv_mes > existing.tpv_mes)
-          tpv[email] = { tpv_mes: val.tpv_mes ?? 0, ultima_venda: val.ultima_venda ?? null }
-      })
-    }
+    Object.entries(emailTpv).forEach(([email, val]) => {
+      const existing = tpv[email]
+      if (!existing || val.tpv_mes > existing.tpv_mes)
+        tpv[email] = { tpv_mes: val.tpv_mes ?? 0, ultima_venda: val.ultima_venda ?? null }
+    })
     setTpvMap(tpv)
     setTpvLoaded(true)
     setIsRefreshing(false)
   }
+
+  // ── Carrega e conclui tarefas ──────────────────────────────────────────────
+  async function loadTasks() {
+    const q = supabase.from('gc_tasks').select('*').order('due_date').order('created_at')
+    const { data } = hasAnyRole(user, ['Admin']) ? await q : await q.eq('gerente_id', user?.id ?? '')
+    if (data) setTasks(data as GcTask[])
+  }
+
+  async function completeTask(taskId: string) {
+    setCompletingId(taskId)
+    const { error } = await supabase.from('gc_tasks').update({
+      status: 'concluida', completed_at: new Date().toISOString(), completed_by: user?.id,
+    }).eq('id', taskId)
+    if (!error) await loadTasks()
+    setCompletingId(null)
+  }
+
+  async function reopenTask(taskId: string) {
+    setCompletingId(taskId)
+    const { error } = await supabase.from('gc_tasks').update({
+      status: 'pendente', completed_at: null, completed_by: null,
+    }).eq('id', taskId)
+    if (!error) await loadTasks()
+    setCompletingId(null)
+  }
+
+  useEffect(() => { if (user) loadTasks() }, [user])
 
   const gerentes = users.filter(u => u.role === 'Gerente de Contas')
   const closers  = users.filter(u => u.role === 'Closer')
@@ -408,6 +499,36 @@ function GCContent() {
     if (error) { toast(error.message, 'error'); return }
     setActs(p => p.map(a => a.id === id ? { ...a, welcome_sent: true } : a))
     toast('Mensagem de boas-vindas confirmada ✓', 'success')
+  }
+
+  // ── Cria nova tarefa manualmente ─────────────────────────────────────────
+  async function saveNewTask() {
+    if (!newTaskForm.activation_id || !newTaskForm.gerente_id || !newTaskForm.tipo || !newTaskForm.title || !newTaskForm.due_date) {
+      toast('Preencha todos os campos obrigatórios.', 'error'); return
+    }
+    setIsSavingTask(true)
+    const act  = activations.find(a => a.id === newTaskForm.activation_id)
+    const tier = act ? (funil(act.faturamento_mensal)?.toLowerCase() ?? null) : null
+    const row = {
+      activation_id: newTaskForm.activation_id,
+      gerente_id:    newTaskForm.gerente_id,
+      client_email:  act?.email ?? '',
+      client_name:   act?.client ?? null,
+      phone:         act?.phone ?? null,
+      tipo:          newTaskForm.tipo,
+      title:         newTaskForm.title,
+      gc_tier:       tier,
+      due_date:      newTaskForm.due_date,
+      status:        'pendente',
+      notes:         newTaskForm.notes || null,
+    }
+    const { error } = await supabase.from('gc_tasks').insert(row)
+    setIsSavingTask(false)
+    if (error) { toast(error.message, 'error'); return }
+    toast('Tarefa criada! ✓', 'success')
+    setModalNewTask(false)
+    setNewTaskForm({ activation_id: '', gerente_id: '', tipo: '', title: '', due_date: '', notes: '' })
+    await loadTasks()
   }
 
   // ── Save client (faturamento + gerente) ─────────────────────────────────
@@ -699,13 +820,23 @@ function GCContent() {
               <RefreshCw size={14} style={{ animation: isRefreshing ? 'spin 1s linear infinite' : 'none' }} />
               {isRefreshing ? 'Atualizando…' : 'Atualizar TPV'}
             </button>
+            {hasAnyRole(user, ['Admin']) && (
+              <button onClick={() => { setModalBulkSync(true); setBulkSyncStats(null); setBulkSyncResults([]); setBulkSyncError(null) }}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
+                  borderRadius: 8, border: '1px solid var(--purple)', cursor: 'pointer',
+                  background: 'color-mix(in srgb, var(--purple) 10%, var(--bg-card))',
+                  color: 'var(--purple)', fontWeight: 700, fontSize: 13, fontFamily: 'inherit' }}>
+                <Database size={14} />
+                Sincronizar CRM
+              </button>
+            )}
             <Button icon={Plus} onClick={() => openNewMeet()}>Nova Reunião</Button>
           </div>
         </div>
 
         {/* ── Tabs ── */}
         <div style={{ display: 'flex', gap: 4, background: 'var(--bg-card2)', borderRadius: 10, padding: 4, marginBottom: 20, width: 'fit-content' }}>
-          {([['kanban','Kanban'],['funis','Funis de Clientes'],['agenda','Agenda']] as const).map(([k,l]) => (
+          {([['kanban','Kanban'],['funis','Funis de Clientes'],['agenda','Agenda'],['tarefas','Tarefas']] as const).map(([k,l]) => (
             <button key={k} onClick={() => setTab(k)} style={{
               padding: '7px 18px', borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
               background: tab === k ? 'var(--action)' : 'transparent',
@@ -1179,6 +1310,379 @@ function GCContent() {
             </div>
           )}
         </Sheet>
+
+        {/* ── Modal: Sincronizar CRM ── */}
+        {modalBulkSync && (
+          <>
+            <div className="overlay" onClick={() => { if (!bulkSyncLoading) setModalBulkSync(false) }} />
+            <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', zIndex: 200, width: 'min(720px, 94vw)', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}
+              className="modal-box">
+              {/* Header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Database size={18} style={{ color: 'var(--purple)' }} />
+                  <span style={{ fontWeight: 800, fontSize: 17 }}>Sincronizar Carteira → CRM DataCrazy</span>
+                </div>
+                {!bulkSyncLoading && (
+                  <button onClick={() => setModalBulkSync(false)}
+                    style={{ background: 'var(--bg-card2)', border: '1px solid var(--border)', borderRadius: 8, padding: '4px 10px', fontSize: 18, cursor: 'pointer', color: 'var(--text2)', lineHeight: 1, fontFamily: 'inherit' }}>
+                    ×
+                  </button>
+                )}
+              </div>
+
+              {/* Body */}
+              <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+                {/* Descrição */}
+                {!bulkSyncLoading && !bulkSyncStats && !bulkSyncError && (
+                  <div style={{ background: 'color-mix(in srgb, var(--purple) 8%, var(--bg-card2))', border: '1px solid color-mix(in srgb, var(--purple) 30%, var(--border))', borderRadius: 12, padding: '14px 16px', fontSize: 13, color: 'var(--text)', lineHeight: 1.65 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 8, color: 'var(--purple)' }}>O que será feito:</div>
+                    <ul style={{ paddingLeft: 16, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                      <li>Fonte: <b>carteira completa do Metabase</b> (todos os clientes dos 3 GCs)</li>
+                      <li>Tier determinado pelo gerente responsável:
+                        <div style={{ marginTop: 5, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 12, padding: '2px 9px', borderRadius: 20, background: '#07BA1C22', color: '#07BA1C', fontWeight: 700 }}>Carlos Eduardo → GC Starter</span>
+                          <span style={{ fontSize: 12, padding: '2px 9px', borderRadius: 20, background: '#2BB9FF22', color: '#2BB9FF', fontWeight: 700 }}>Gabriel Bairros → GC Growth</span>
+                          <span style={{ fontSize: 12, padding: '2px 9px', borderRadius: 20, background: 'color-mix(in srgb,var(--purple) 15%,transparent)', color: 'var(--purple)', fontWeight: 700 }}>Rafael Mendes → GC Enterprise</span>
+                        </div>
+                      </li>
+                      <li>Lead pesquisado por e-mail → fallback telefone → criado se não existir</li>
+                      <li>Tag GC adicionada ao lead</li>
+                      <li>Negócio criado no pipeline correto — sem duplicar se já existir</li>
+                    </ul>
+                  </div>
+                )}
+
+                {/* Loading */}
+                {bulkSyncLoading && (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '32px 0' }}>
+                    <Loader2 size={36} style={{ animation: 'spin 1s linear infinite', color: 'var(--purple)' }} />
+                    <div style={{ fontSize: 14, color: 'var(--text2)', fontWeight: 600 }}>Sincronizando clientes… isso pode levar alguns minutos</div>
+                    <div style={{ fontSize: 12, color: 'var(--text2)' }}>Não feche esta janela</div>
+                  </div>
+                )}
+
+                {/* Erro */}
+                {bulkSyncError && (
+                  <div style={{ background: 'color-mix(in srgb, var(--red) 10%, var(--bg-card2))', border: '1px solid color-mix(in srgb, var(--red) 40%, var(--border))', borderRadius: 12, padding: '14px 16px', fontSize: 13, color: 'var(--red)', fontWeight: 600 }}>
+                    ✕ {bulkSyncError}
+                  </div>
+                )}
+
+                {/* Stats */}
+                {bulkSyncStats && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {/* Pipelines encontrados */}
+                    {bulkSyncStats.pipelinesFound && Object.keys(bulkSyncStats.pipelinesFound).length > 0 && (
+                      <div style={{ background: 'var(--bg-card2)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Pipelines mapeados:</span>
+                        {Object.entries(bulkSyncStats.pipelinesFound).map(([tier, name]) => {
+                          const c = tier.includes('Starter') ? '#07BA1C' : tier.includes('Growth') ? '#2BB9FF' : 'var(--purple)'
+                          return <span key={tier} style={{ fontSize: 12, padding: '2px 9px', borderRadius: 20, background: `color-mix(in srgb, ${c} 15%, transparent)`, color: c, fontWeight: 700 }}>{tier} → {name}</span>
+                        })}
+                      </div>
+                    )}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                      {[
+                        { label: 'Total Carteira',   value: bulkSyncStats.total,        color: 'var(--text2)' },
+                        { label: 'Negócios Criados', value: bulkSyncStats.bizCreated,    color: 'var(--green)' },
+                        { label: 'Já Existiam',      value: bulkSyncStats.bizExisting,   color: 'var(--action)' },
+                        { label: 'Leads Criados',    value: bulkSyncStats.leadsCreated,  color: 'var(--cyan)' },
+                        { label: 'Erros',            value: bulkSyncStats.errors,        color: bulkSyncStats.errors > 0 ? 'var(--red)' : 'var(--text2)' },
+                        { label: 'Starter / Growth / Enterprise', value: `${bulkSyncStats.starter} / ${bulkSyncStats.growth} / ${bulkSyncStats.enterprise}`, color: 'var(--text2)' },
+                      ].map(k => (
+                        <div key={k.label} style={{ background: 'var(--bg-card2)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', textAlign: 'center' }}>
+                          <div style={{ fontSize: 22, fontWeight: 800, color: k.color }}>{k.value}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 3, fontWeight: 600 }}>{k.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Tabela de resultados */}
+                {bulkSyncResults.length > 0 && (
+                  <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+                    <table className="tbl" style={{ fontSize: 12 }}>
+                      <thead>
+                        <tr>
+                          <th>Cliente</th>
+                          <th>Gerente / Tier</th>
+                          <th>Lead</th>
+                          <th>Negócio</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {bulkSyncResults.map((r, i) => {
+                          const tierColor = r.tier === 'GC Starter' ? '#07BA1C' : r.tier === 'GC Growth' ? '#2BB9FF' : r.tier === 'GC Enterprise' ? 'var(--purple)' : 'var(--text2)'
+                          const LEAD_LABEL: Record<string, string> = { created: '✦ Criado', found_email: '✓ Email', found_phone: '✓ Tel' }
+                          const BIZ_LABEL:  Record<string, string>  = { created: '✦ Criado', already_exists: '~ Existia' }
+                          const isErr  = r.status === 'error'
+                          const isSkip = r.status === 'skip'
+                          return (
+                            <tr key={i} style={{ opacity: isSkip ? 0.5 : 1 }}>
+                              <td>
+                                <div style={{ fontWeight: 600 }}>{r.client}</div>
+                                <div style={{ fontSize: 11, color: 'var(--text2)' }}>{r.email}</div>
+                              </td>
+                              <td>
+                                <div style={{ fontSize: 11, color: 'var(--text2)' }}>{r.gerente}</div>
+                                {r.tier
+                                  ? <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, background: `color-mix(in srgb, ${tierColor} 15%, var(--bg-card2))`, color: tierColor }}>{r.tier.replace('GC ', '')}</span>
+                                  : <span style={{ fontSize: 10, color: 'var(--text2)' }}>—</span>}
+                              </td>
+                              <td style={{ color: r.leadAction === 'created' ? 'var(--cyan)' : 'var(--green)', fontWeight: 600 }}>
+                                {r.leadAction ? (LEAD_LABEL[r.leadAction] ?? r.leadAction) : '—'}
+                              </td>
+                              <td style={{ color: r.bizAction === 'created' ? 'var(--green)' : r.bizAction === 'already_exists' ? 'var(--action)' : 'var(--text2)', fontWeight: 600 }}>
+                                {r.bizAction ? (BIZ_LABEL[r.bizAction] ?? r.bizAction) : '—'}
+                              </td>
+                              <td>
+                                {isErr
+                                  ? <span style={{ color: 'var(--red)', fontWeight: 700, cursor: 'help' }} title={r.error}>✕</span>
+                                  : isSkip
+                                  ? <span style={{ color: 'var(--text2)', fontSize: 11 }}>skip</span>
+                                  : <span style={{ color: 'var(--green)', fontWeight: 700 }}>✓</span>}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div style={{ padding: '14px 24px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 10, flexShrink: 0 }}>
+                {!bulkSyncLoading && (
+                  <button onClick={() => setModalBulkSync(false)}
+                    style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card2)', color: 'var(--text)', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+                    Fechar
+                  </button>
+                )}
+                <button onClick={syncCRM} disabled={bulkSyncLoading}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 20px', borderRadius: 8,
+                    border: 'none', background: bulkSyncLoading ? 'var(--border)' : 'var(--purple)',
+                    color: '#fff', fontSize: 14, fontWeight: 700, cursor: bulkSyncLoading ? 'default' : 'pointer', fontFamily: 'inherit',
+                    opacity: bulkSyncLoading ? 0.7 : 1 }}>
+                  {bulkSyncLoading
+                    ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Sincronizando…</>
+                    : <><Database size={14} /> {bulkSyncStats ? 'Sincronizar Novamente' : 'Iniciar Sincronização'}</>}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ── Modal: Nova Tarefa ── */}
+        <Modal open={modalNewTask} onClose={() => { setModalNewTask(false); setNewTaskForm({ ...EMPTY_TASK_FORM }) }} title="Nova Tarefa">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+            {/* Cliente */}
+            <Field label="Cliente *">
+              <Sel
+                value={newTaskForm.activation_id}
+                onChange={v => {
+                  const act = activations.find(a => a.id === v)
+                  setNewTaskForm(p => ({
+                    ...p,
+                    activation_id: v,
+                    gerente_id: act?.gerente_id || p.gerente_id || '',
+                  }))
+                }}
+                options={activations.map(a => ({ value: a.id, label: `${a.client} — ${a.email}` }))}
+                placeholder="Selecione o cliente"
+              />
+            </Field>
+
+            {/* Preview do cliente */}
+            {newTaskForm.activation_id && (() => {
+              const act = activations.find(a => a.id === newTaskForm.activation_id)
+              if (!act) return null
+              const f     = funil(act.faturamento_mensal)
+              const color = f ? FUNIL_COLORS[f] : 'var(--border)'
+              return (
+                <div style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--bg-card2)', fontSize: 12, display: 'flex', gap: 12, alignItems: 'center' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700 }}>{act.client}</div>
+                    <div style={{ color: 'var(--text2)' }}>{act.email}</div>
+                    {act.phone && <div style={{ color: 'var(--text2)' }}>{act.phone}</div>}
+                  </div>
+                  {f && <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: `${color}22`, color }}>{f}</span>}
+                </div>
+              )
+            })()}
+
+            {/* Gerente */}
+            <Field label="Gerente de Contas *">
+              <Sel
+                value={newTaskForm.gerente_id}
+                onChange={v => setNewTaskForm(p => ({ ...p, gerente_id: v }))}
+                options={gerentes.map(g => ({ value: g.id, label: g.name }))}
+                placeholder="Selecione o gerente"
+              />
+            </Field>
+
+            {/* Tipo */}
+            <Field label="Tipo de Tarefa *">
+              <Sel
+                value={newTaskForm.tipo}
+                onChange={v => setNewTaskForm(p => ({ ...p, tipo: v, title: TASK_LABEL[v] || '' }))}
+                options={Object.entries(TASK_LABEL).map(([value, label]) => ({ value, label }))}
+                placeholder="Selecione o tipo"
+              />
+            </Field>
+
+            {/* Título */}
+            <Field label="Título *">
+              <input className="inp" value={newTaskForm.title}
+                onChange={e => setNewTaskForm(p => ({ ...p, title: e.target.value }))}
+                placeholder="Título da tarefa" />
+            </Field>
+
+            {/* Data */}
+            <Field label="Data de Vencimento *">
+              <input className="inp" type="date" value={newTaskForm.due_date}
+                onChange={e => setNewTaskForm(p => ({ ...p, due_date: e.target.value }))} />
+            </Field>
+
+            {/* Observações */}
+            <Field label="Observações">
+              <textarea className="inp" rows={3} value={newTaskForm.notes}
+                onChange={e => setNewTaskForm(p => ({ ...p, notes: e.target.value }))}
+                placeholder="Anotações, instruções ou contexto…"
+                style={{ resize: 'vertical' }} />
+            </Field>
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Button variant="secondary" onClick={() => { setModalNewTask(false); setNewTaskForm({ ...EMPTY_TASK_FORM }) }}>Cancelar</Button>
+              <Button
+                onClick={saveNewTask}
+                disabled={isSavingTask || !newTaskForm.activation_id || !newTaskForm.gerente_id || !newTaskForm.tipo || !newTaskForm.title || !newTaskForm.due_date}>
+                {isSavingTask ? 'Criando…' : 'Criar Tarefa'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+
+        {/* ══ ABA TAREFAS ══════════════════════════════════════════════════ */}
+        {tab === 'tarefas' && (() => {
+          const today2 = new Date().toISOString().slice(0, 10)
+          const pending   = tasks.filter(t => t.status !== 'concluida').sort((a, b) => a.due_date.localeCompare(b.due_date))
+          const completed = tasks.filter(t => t.status === 'concluida').sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''))
+          const overdue   = pending.filter(t => t.due_date < today2).length
+          const card2: React.CSSProperties = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }
+
+          const TaskRow = ({ t }: { t: GcTask }) => {
+            const label       = t.title ?? TASK_LABEL[t.tipo] ?? t.tipo
+            const isOverdue   = t.status !== 'concluida' && t.due_date < today2
+            const tierColor   = t.gc_tier ? TIER_COLOR[t.gc_tier] : 'var(--text2)'
+            const gerenteName = users.find(u => u.id === t.gerente_id)?.name ?? '—'
+            const [expanded, setExpanded] = useState(false)
+            return (
+              <div style={{ borderBottom: '1px solid var(--border)' }}>
+                <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-card2)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 700, fontSize: 13, color: t.tipo === 'alterar_taxas' ? 'var(--red)' : 'var(--text)' }}>{label}</span>
+                      {t.gc_tier && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, background: `${tierColor}22`, color: tierColor, textTransform: 'capitalize' }}>{t.gc_tier}</span>}
+                      {isOverdue && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, background: '#ff3b3022', color: 'var(--red)' }}>Vencida</span>}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3 }}>
+                      <span style={{ fontSize: 12, color: 'var(--text2)' }}>
+                        {t.client_name || t.client_email}
+                        {hasAnyRole(user, ['Admin']) && <span style={{ marginLeft: 8, color: avatarColor(gerenteName), fontWeight: 600 }}>· {gerenteName}</span>}
+                      </span>
+                      {(t.tipo === 'alterar_taxas' || t.tipo === 'adicionar_carteira') && t.notes && (
+                        <button onClick={() => setExpanded(p => !p)}
+                          style={{ fontSize: 11, color: 'var(--action)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px', fontFamily: 'inherit', fontWeight: 600 }}>
+                          {expanded ? '▲ ocultar notas' : '▼ ver notas'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                <div style={{ fontSize: 12, color: isOverdue ? 'var(--red)' : 'var(--text2)', whiteSpace: 'nowrap', fontWeight: isOverdue ? 700 : 400 }}>
+                  {new Date(t.due_date + 'T12:00:00').toLocaleDateString('pt-BR')}
+                </div>
+                {t.phone && (
+                  <a href={`https://wa.me/55${t.phone.replace(/\D/g, '').replace(/^55/, '')}`}
+                    target="_blank" rel="noreferrer"
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, background: '#25D36622', border: '1px solid #25D366', flexShrink: 0, textDecoration: 'none' }}
+                    title={t.phone}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="#25D366"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                  </a>
+                )}
+                {t.status !== 'concluida' ? (
+                  <button onClick={() => completeTask(t.id)} disabled={completingId === t.id}
+                    style={{ padding: '5px 12px', borderRadius: 8, border: '1px solid var(--green)', background: 'color-mix(in srgb,var(--green) 12%,var(--bg-card))', color: 'var(--green)', fontWeight: 700, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+                    {completingId === t.id ? '...' : '✓ Concluir'}
+                  </button>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                      ✓ {t.completed_at ? new Date(t.completed_at).toLocaleDateString('pt-BR') : ''}
+                    </div>
+                    <button onClick={() => reopenTask(t.id)} disabled={completingId === t.id}
+                      style={{ padding: '4px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card2)', color: 'var(--text2)', fontWeight: 600, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+                      {completingId === t.id ? '...' : '↩ Reabrir'}
+                    </button>
+                  </div>
+                )}
+                </div>
+                {(t.tipo === 'alterar_taxas' || t.tipo === 'adicionar_carteira') && t.notes && expanded && (
+                  <div style={{ margin: '0 16px 12px', padding: 12, background: 'var(--bg-card2)', borderRadius: 8, fontSize: 12, color: 'var(--text2)', whiteSpace: 'pre-wrap', lineHeight: 1.6, maxHeight: 260, overflowY: 'auto' }}>
+                    {t.notes}
+                  </div>
+                )}
+              </div>
+            )
+          }
+
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
+                {[
+                  { label: 'Pendentes',  value: pending.length,   color: 'var(--action)' },
+                  { label: 'Vencidas',   value: overdue,          color: overdue > 0 ? 'var(--red)' : 'var(--text2)' },
+                  { label: 'Concluídas', value: completed.length, color: 'var(--green)' },
+                  { label: 'Total',      value: tasks.length,     color: 'var(--text2)' },
+                ].map(k => (
+                  <div key={k.label} style={{ ...card2, textAlign: 'center' }}>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: k.color }}>{k.value}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>{k.label}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <div style={{ display: 'flex', gap: 4, background: 'var(--bg-card2)', borderRadius: 10, padding: 4, width: 'fit-content' }}>
+                  {([['pendentes', `Pendentes (${pending.length})`], ['relatorio', `Relatório (${completed.length})`]] as const).map(([k, l]) => (
+                    <button key={k} onClick={() => setTaskTab(k)}
+                      style={{ padding: '7px 18px', borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                        background: taskTab === k ? 'var(--action)' : 'transparent',
+                        color: taskTab === k ? '#fff' : 'var(--text2)', fontWeight: 600, fontSize: 13 }}>{l}</button>
+                  ))}
+                </div>
+                <Button icon={Plus} onClick={() => { setNewTaskForm({ activation_id: '', gerente_id: user?.role === 'Gerente de Contas' ? (user?.id ?? '') : '', tipo: '', title: '', due_date: '', notes: '' }); setModalNewTask(true) }}>Nova Tarefa</Button>
+              </div>
+              <div style={{ ...card2, padding: 0, overflow: 'hidden' }}>
+                {taskTab === 'pendentes' && (pending.length === 0
+                  ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--text2)', fontSize: 14 }}>Nenhuma tarefa pendente 🎉</div>
+                  : pending.map(t => <TaskRow key={t.id} t={t} />)
+                )}
+                {taskTab === 'relatorio' && (completed.length === 0
+                  ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--text2)', fontSize: 14 }}>Nenhuma tarefa concluída ainda.</div>
+                  : completed.map(t => <TaskRow key={t.id} t={t} />)
+                )}
+              </div>
+            </div>
+          )
+        })()}
+
       </div>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </>

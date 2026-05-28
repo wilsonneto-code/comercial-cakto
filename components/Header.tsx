@@ -24,22 +24,37 @@ export function Header() {
   const { pathname } = useLocation();
   const [ddOpen, setDdOpen] = useState(false);
 
-  const nav = [
-    ...NAV_ITEMS,
-    ...(hasAnyRole(user, ['Admin', 'Gerente de Contas']) ? [
-      { key: 'gerente-contas',     label: 'Gerente de Contas' },
-      { key: 'gc-ativacoes',       label: 'GC — Ativações' },
-      { key: 'metabase',           label: 'MetaBase' },
-      { key: 'relatorio-pipeline', label: 'Pipeline' },
-    ] : []),
-    ...(hasAnyRole(user, ['Admin']) ? [
-      { key: 'pagamentos',    label: 'Pagamentos'    },
-      { key: 'configuracoes', label: 'Configurações' },
-    ] : [
-      { key: 'pagamentos',    label: 'Pagamentos'    },
-    ]),
-  ];
+  // Sócio: apenas Relatórios e MetaBase
+  const isSocio = hasAnyRole(user, ['Sócio']) && !hasAnyRole(user, ['Admin'])
+  if (isSocio) {
+    var nav = [
+      { key: 'relatorio-calls', label: 'Relatório de Calls' },
+      { key: 'dashboards',      label: 'Dashboards'         },
+      { key: 'metabase',        label: 'MetaBase'           },
+      { key: 'ranking',         label: 'Ranking'            },
+      { key: 'plano-carreira',  label: 'Plano de Carreira'  },
+    ]
+  } else {
+    var nav = [
+      ...NAV_ITEMS,
+      ...(hasAnyRole(user, ['Admin', 'Gerente de Contas']) ? [
+        { key: 'gerente-contas',     label: 'Gerente de Contas' },
+        { key: 'gc-ativacoes',       label: 'GC — Ativações' },
+        { key: 'metabase',           label: 'MetaBase' },
+        { key: 'relatorio-pipeline', label: 'Pipeline' },
+      ] : []),
+      ...(hasAnyRole(user, ['Admin']) ? [
+        { key: 'plano-carreira', label: 'Plano de Carreira' },
+        { key: 'pagamentos',    label: 'Pagamentos'    },
+        { key: 'configuracoes', label: 'Configurações' },
+      ] : [
+        { key: 'pagamentos',    label: 'Pagamentos'    },
+      ]),
+    ]
+  }
 
+  const { isPreview } = useAuth();
+  const BANNER_H = isPreview ? 36 : 0;
   const isActive = (key: string) => pathname === `/${key}`;
 
   const navLinkStyle = (key: string): React.CSSProperties => ({
@@ -52,7 +67,7 @@ export function Header() {
 
   return (
     <header style={{
-      position: 'fixed', top: 0, left: 0, right: 0, zIndex: 50, height: 64,
+      position: 'fixed', top: BANNER_H, left: 0, right: 0, zIndex: 50, height: 64,
       background: 'var(--header-bg)',
       backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
       borderBottom: '1px solid var(--border)',
@@ -63,7 +78,7 @@ export function Header() {
         style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none',
           cursor: 'pointer', flexShrink: 0 }}>
         <div style={{ width: 30, height: 30, borderRadius: 8,
-          background: 'linear-gradient(135deg,#2997FF,#BF5AF2)',
+          background: 'linear-gradient(135deg,#4ef461,#07ba1c)',
           display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Zap size={16} color="#fff" />
         </div>

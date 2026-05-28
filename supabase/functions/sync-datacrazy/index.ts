@@ -44,7 +44,7 @@ serve(async (req) => {
     new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } })
 
   try {
-    const { name, email, phone, team_uuid, notes, image_urls, faturamento_mensal } = await req.json()
+    const { name, email, phone, team_uuid, notes, image_urls, faturamento_mensal, channel } = await req.json()
 
     // Busca API Key nas configurações do Supabase
     const supabase = createClient(
@@ -233,6 +233,54 @@ serve(async (req) => {
         // Não quebra o fluxo principal se o funil GC falhar
         console.error('[sync-datacrazy] Erro ao criar negócio GC:', String(gcErr))
       }
+    }
+
+    // ── 8. Adiciona tags ao lead (canal + tier GC) ───────────────────────────
+    try {
+      const tagsToAdd: string[] = []
+      if (channel) tagsToAdd.push(channel)
+      if (faturamento_mensal != null) {
+        const fat = Number(faturamento_mensal)
+        tagsToAdd.push(fat <= 50000 ? 'GC Starter' : fat <= 250000 ? 'GC Growth' : 'GC Enterprise')
+      }
+
+      if (tagsToAdd.length > 0) {
+        const tagsRes  = await fetch(`${BASE}/tags?take=100`, { headers: h })
+        const tagsData = await tagsRes.json()
+        const existingTags: Array<{ id: string; name: string }> = tagsData.data ?? tagsData ?? []
+
+        const tagIds: string[] = []
+        for (const tagName of tagsToAdd) {
+          let tag = existingTags.find(t => t.name?.toLowerCase() === tagName.toLowerCase())
+
+          if (!tag) {
+            const createTagRes = await fetch(`${BASE}/tags`, {
+              method: 'POST', headers: h,
+              body: JSON.stringify({ name: tagName }),
+            })
+            const created = await createTagRes.json()
+            tag = created?.id ? created : null
+            if (tag) {
+              existingTags.push(tag)
+              console.log(`[sync-datacrazy] Tag criada: "${tagName}" → ${tag.id}`)
+            } else {
+              console.warn(`[sync-datacrazy] Falha ao criar tag "${tagName}":`, JSON.stringify(created))
+              continue
+            }
+          }
+          tagIds.push(tag.id)
+        }
+
+        if (tagIds.length > 0) {
+          const patchRes = await fetch(`${BASE}/leads/${leadId}`, {
+            method: 'PATCH', headers: h,
+            body: JSON.stringify({ tags: tagIds.map(id => ({ id })) }),
+          })
+          console.log(`[sync-datacrazy] Tags adicionadas (${tagsToAdd.join(', ')}): ${patchRes.status}`)
+        }
+      }
+    } catch (tagErr) {
+      console.error('[sync-datacrazy] Erro ao adicionar tags:', String(tagErr))
     }
 
     return json({ success: true, leadId })

@@ -8,16 +8,22 @@ interface BarChartHProps {
   data?: DataPoint[];
   valueKey?: string;
   labelKey?: string;
+  displayKey?: string;
   color1?: string;
   color2?: string;
+  labelWidth?: number;
+  valueWidth?: number;
 }
 
 export function BarChartH({
   data = [],
   valueKey = 'value',
   labelKey = 'label',
+  displayKey,
   color1 = '#2997FF',
   color2 = '#BF5AF2',
+  labelWidth = 90,
+  valueWidth = 28,
 }: BarChartHProps) {
   const max = Math.max(...data.map(d => Number(d[valueKey])), 1);
 
@@ -26,7 +32,7 @@ export function BarChartH({
       {data.map((d, i) => (
         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{
-            fontSize: 12, color: 'var(--text2)', width: 90, textAlign: 'right', flexShrink: 0,
+            fontSize: 12, color: 'var(--text2)', width: labelWidth, textAlign: 'right', flexShrink: 0,
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>
             {d[labelKey]}
@@ -37,8 +43,8 @@ export function BarChartH({
               background: `linear-gradient(90deg,${color1},${color2})`, transition: 'width .4s',
             }} />
           </div>
-          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', width: 28, flexShrink: 0 }}>
-            {d[valueKey]}
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', width: valueWidth, flexShrink: 0, textAlign: 'right' }}>
+            {displayKey ? d[displayKey] : d[valueKey]}
           </span>
         </div>
       ))}

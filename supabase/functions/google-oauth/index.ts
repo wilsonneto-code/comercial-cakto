@@ -40,6 +40,9 @@ serve(async (req) => {
       const userId = body.user_id ?? ''
       if (!userId) return json({ error: 'user_id obrigatório' }, 400)
 
+      const returnTo = (body.return_to as string | undefined) ?? '/gerente-contas'
+      const stateVal = `${userId}|${returnTo}`
+
       const params = new URLSearchParams({
         client_id:     CLIENT_ID,
         redirect_uri:  REDIRECT_URI,
@@ -47,7 +50,7 @@ serve(async (req) => {
         scope:         SCOPES,
         access_type:   'offline',
         prompt:        'consent',
-        state:         userId,
+        state:         stateVal,
       })
 
       return json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${params}` })
@@ -58,12 +61,13 @@ serve(async (req) => {
 
   // ── Callback OAuth ────────────────────────────────────────────────────────
   if (action === 'callback') {
-    const code   = code_param ?? url.searchParams.get('code')
-    const userId = url.searchParams.get('state')
-    const error  = url.searchParams.get('error')
+    const code     = code_param ?? url.searchParams.get('code')
+    const rawState = url.searchParams.get('state') ?? ''
+    const [userId, returnTo = '/gerente-contas'] = rawState.split('|')
+    const error    = url.searchParams.get('error')
 
     if (error || !code || !userId) {
-      return Response.redirect(`${APP_URL}/gerente-contas?google_oauth=error`, 302)
+      return Response.redirect(`${APP_URL}${returnTo}?google_oauth=error`, 302)
     }
 
     try {
@@ -102,10 +106,10 @@ serve(async (req) => {
         google_calendar_id:   calendarId,
       }).eq('id', userId)
 
-      return Response.redirect(`${APP_URL}/gerente-contas?google_oauth=success`, 302)
+      return Response.redirect(`${APP_URL}${returnTo}?google_oauth=success`, 302)
     } catch (e) {
       console.error('[google-oauth] callback error:', e)
-      return Response.redirect(`${APP_URL}/gerente-contas?google_oauth=error`, 302)
+      return Response.redirect(`${APP_URL}${returnTo}?google_oauth=error`, 302)
     }
   }
 

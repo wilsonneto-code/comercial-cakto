@@ -99,9 +99,9 @@ a { text-decoration: none; color: inherit; }
 .scale-in   { animation: scaleIn  .2s  cubic-bezier(.34,1.56,.64,1) both; }
 .slide-in-r { animation: slideInR .28s cubic-bezier(.32,.72,0,1) both; }
 
-/* Logo gradient */
+/* Logo gradient — Cakto brand green */
 .logo-text {
-  background: linear-gradient(135deg, var(--action) 0%, var(--purple) 100%);
+  background: linear-gradient(135deg, #4ef461 0%, #07ba1c 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -316,6 +316,11 @@ textarea.inp { resize: vertical; min-height: 80px; }
   max-width: 1200px;
   margin: 0 auto;
   padding: 88px 24px 40px;
+}
+
+/* Preview mode: shift page content down by banner height */
+body.preview-mode .page-wrap {
+  padding-top: 124px; /* 88 + 36 */
 }
 
 /* Card hover */

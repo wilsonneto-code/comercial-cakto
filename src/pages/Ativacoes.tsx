@@ -23,6 +23,9 @@ type DbActivation = {
   // ATENÇÃO: a coluna `indicado_por` deve existir na tabela `activations` do Supabase.
   // Se não existir, crie-a como: indicado_por text
   indicado_por: string | null
+  notes: string | null
+  image_urls: string[] | null
+  faturamento_mensal: number | null
 }
 type DbUser  = { id: string; name: string; email: string | null; role: string; team_id: string | null }
 type DbTeam  = { id: string; name: string }
@@ -131,7 +134,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
       const [{ data: acts, error: ae }, { data: usrs, error: ue }, { data: tms }] = await Promise.all([
         supabase
           .from('activations')
-          .select('id,client,email,phone,channel,responsible,date,time,sdr_id,sdr_nome,indicado_por')
+          .select('id,client,email,phone,channel,responsible,date,time,sdr_id,sdr_nome,indicado_por,notes,image_urls,faturamento_mensal')
           .gte('date', dateRange.startDate)
           .lte('date', dateRange.endDate)
           .order('date', { ascending: false })
@@ -160,10 +163,9 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
     return tid ? (teams.find(t => t.id === tid)?.name ?? '—') : '—'
   }
 
-  // SDRs disponíveis: filtra pelo time do responsável selecionado no form
-  const responsibleTeamId = users.find(u => u.id === form.responsible)?.team_id ?? null
-  const sdrOptions = users.filter(u => u.role === 'SDR' && u.team_id === responsibleTeamId && responsibleTeamId !== null)
-  const allSdrs = users.filter(u => u.role === 'SDR')
+  // SDRs disponíveis: qualquer closer pode selecionar qualquer SDR
+  const sdrOptions = users.filter(u => u.role === 'SDR')
+  const allSdrs = sdrOptions
 
   // Ranking: computed from the already-filtered activations (respects date range)
   const rankingDisplay = useMemo(() => {
@@ -222,8 +224,9 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
     if (!form.phone || form.phone === '+55 ') missing.push('Telefone')
     if (!form.faturamento_mensal) missing.push('Faturamento Mensal')
     if (!form.notes)             missing.push('Notas')
-    if (form.images.length === 0) missing.push('Arquivos / Imagens')
-    if (sdrOptions.length > 0 && !form.sdr_id) missing.push('SDR Responsável')
+    // Imagens obrigatórias só no cadastro novo; na edição já existem arquivos anteriores
+    if (!modalEdit && form.images.length === 0) missing.push('Arquivos / Imagens')
+    // SDR é opcional — closer pode salvar sem SDR
     if (missing.length > 0) {
       toast(`Campos obrigatórios: ${missing.join(', ')}`, 'error'); return
     }
@@ -278,6 +281,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
                 notes:              form.notes || null,
                 image_urls:         imageUrls,
                 faturamento_mensal: form.faturamento_mensal ? parseFloat(form.faturamento_mensal) || null : null,
+                channel:            form.channel || null,
               },
               headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined,
             })
@@ -387,6 +391,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
             notes:              form.notes || null,
             image_urls:         imageUrls,
             faturamento_mensal: form.faturamento_mensal ? parseFloat(form.faturamento_mensal) || null : null,
+            channel:            form.channel || null,
           },
           headers: authHeaders,
         })
@@ -430,6 +435,44 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
 
   // ── Form fields (variable — evita unmount no re-render) ───────────────────
   const noTeamWarning = form.responsible && !responsibleTeamId
+
+  // Bloco de histórico de arquivos já enviados (reutilizado nos dois formulários de edição)
+  const existingImagesJSX = modalEdit?.image_urls?.length ? (
+    <Field label="Histórico de Arquivos">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {modalEdit.image_urls.map((url, i) => {
+          const isPdf = url.toLowerCase().includes('.pdf') || url.toLowerCase().includes('pdf')
+          const fileName = decodeURIComponent(url.split('/').pop()?.split('?')[0] ?? `Arquivo ${i + 1}`)
+          return (
+            <a key={i} href={url} target="_blank" rel="noopener noreferrer"
+              style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg-card2)',
+                border: '1px solid var(--border)', borderRadius: 10, padding: '8px 12px',
+                textDecoration: 'none', color: 'var(--text)', transition: 'border-color .15s' }}
+              onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--action)')}
+              onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}>
+              {isPdf ? (
+                <div style={{ width: 36, height: 36, borderRadius: 8, background: 'color-mix(in srgb,var(--red) 15%,var(--bg-card))',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 13, fontWeight: 700, color: 'var(--red)' }}>
+                  PDF
+                </div>
+              ) : (
+                <img src={url} alt={fileName}
+                  style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover', flexShrink: 0, background: 'var(--bg-card)' }}
+                  onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {fileName}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--action)', marginTop: 2 }}>Clique para abrir</div>
+              </div>
+            </a>
+          )
+        })}
+      </div>
+    </Field>
+  ) : null
+
   // Campos de edição de dados do cliente (sem Responsável/SDR)
   const clientFieldsJSX = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -473,7 +516,11 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
           placeholder="Observações sobre o cliente, contrato, produto…"
           style={{ resize: 'vertical', fontSize: 13 }} />
       </Field>
-      <Field label="Arquivos / Imagens" required>
+
+      {/* Histórico de arquivos existentes */}
+      {existingImagesJSX}
+
+      <Field label="Adicionar Novos Arquivos">
         <label style={{
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           gap: 6, padding: '16px 12px', border: '2px dashed var(--border)', borderRadius: 10,
@@ -542,25 +589,11 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
       )}
 
       {/* SDR Responsável */}
-      <Field label="SDR Responsável" required={sdrOptions.length > 0}>
-        {!form.responsible ? (
-          <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text2)', background: 'var(--bg-card2)',
-            border: '1px solid var(--border)', borderRadius: 8 }}>
-            Selecione um Responsável primeiro
-          </div>
-        ) : sdrOptions.length === 0 ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', fontSize: 12,
-            color: 'var(--text2)', background: 'color-mix(in srgb, var(--action) 8%, var(--bg-card2))',
-            border: '1px solid var(--border)', borderRadius: 8 }}>
-            <AlertTriangle size={13} color="var(--action)" />
-            Sem SDRs cadastrados neste time — salvando sem SDR
-          </div>
-        ) : (
-          <Sel value={form.sdr_id}
-            onChange={v => setForm(p => ({ ...p, sdr_id: v }))}
-            options={sdrOptions.map(u => ({ value: u.id, label: u.name }))}
-            placeholder="Selecione o SDR…" />
-        )}
+      <Field label="SDR Responsável">
+        <Sel value={form.sdr_id}
+          onChange={v => setForm(p => ({ ...p, sdr_id: v }))}
+          options={sdrOptions.map(u => ({ value: u.id, label: u.name }))}
+          placeholder="Selecione o SDR… (opcional)" />
       </Field>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -594,7 +627,10 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
           style={{ resize: 'vertical', fontSize: 13 }} />
       </Field>
 
-      <Field label="Arquivos / Imagens" required>
+      {/* Histórico de arquivos existentes (só aparece no modal de edição) */}
+      {existingImagesJSX}
+
+      <Field label={modalEdit ? 'Adicionar Novos Arquivos' : 'Arquivos / Imagens'} required={!modalEdit}>
         <label style={{
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           gap: 6, padding: '16px 12px', border: '2px dashed var(--border)', borderRadius: 10,
@@ -850,7 +886,8 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
                             onClick={() => {
                               setForm({ ...EMPTY_FORM, client: a.client, email: a.email || '',
                                 phone: a.phone || '', channel: a.channel, responsible: a.responsible,
-                                date: a.date, sdr_id: a.sdr_id || '', notes: (a as any).notes || '',
+                                date: a.date, sdr_id: a.sdr_id || '', notes: a.notes || '',
+                                faturamento_mensal: a.faturamento_mensal != null ? String(a.faturamento_mensal) : '',
                                 images: [] })
                               setModalEdit(a)
                             }}
@@ -914,6 +951,9 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
         <Sheet open={!!sheetView} onClose={() => setSheetView(null)} title="Detalhes da Ativação">
           {sheetView && (() => {
             const sdrName = sheetView.sdr_nome || (sheetView.sdr_id ? getUserName(sheetView.sdr_id) : null)
+            const fat = sheetView.faturamento_mensal
+            const tier = fat ? (fat <= 50000 ? 'Starter' : fat <= 250000 ? 'Growth' : 'Enterprise') : null
+            const tierColor = tier === 'Starter' ? '#07BA1C' : tier === 'Growth' ? '#2BB9FF' : tier === 'Enterprise' ? '#BF5AF2' : 'var(--text2)'
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -930,12 +970,71 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
                   ['SDR', sdrName || '—'],
                   ['Telefone', sheetView.phone || '—'],
                   ['Data', `${formatDate(sheetView.date)} às ${sheetView.time || ''}`],
+                  ...(fat ? [['Faturamento', <span key="fat" style={{ fontWeight: 700, color: tierColor }}>{fat.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })} / mês · {tier}</span>]] : []),
                 ] as [string, React.ReactNode][]).map(([l, v]) => (
                   <div key={l as string} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 13, color: 'var(--text2)' }}>{l}</span>
                     <span style={{ fontSize: 14, fontWeight: 600 }}>{v}</span>
                   </div>
                 ))}
+
+                {/* Notas */}
+                {sheetView.notes && (
+                  <>
+                    <Divider />
+                    <div>
+                      <div style={{ fontSize: 12, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>Notas</div>
+                      <div style={{ fontSize: 13, color: 'var(--text)', background: 'var(--bg-card2)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                        {sheetView.notes}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Histórico de arquivos */}
+                {sheetView.image_urls && sheetView.image_urls.length > 0 && (
+                  <>
+                    <Divider />
+                    <div>
+                      <div style={{ fontSize: 12, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 10 }}>
+                        Arquivos ({sheetView.image_urls.length})
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {sheetView.image_urls.map((url, i) => {
+                          const isPdf = url.toLowerCase().includes('.pdf') || url.toLowerCase().includes('pdf')
+                          const fileName = decodeURIComponent(url.split('/').pop()?.split('?')[0] ?? `Arquivo ${i + 1}`)
+                          return (
+                            <a key={i} href={url} target="_blank" rel="noopener noreferrer"
+                              style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg-card2)',
+                                border: '1px solid var(--border)', borderRadius: 10, padding: '8px 12px',
+                                textDecoration: 'none', color: 'var(--text)', transition: 'border-color .15s' }}
+                              onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--action)')}
+                              onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}>
+                              {isPdf ? (
+                                <div style={{ width: 40, height: 40, borderRadius: 8,
+                                  background: 'color-mix(in srgb,var(--red) 15%,var(--bg-card))',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  flexShrink: 0, fontSize: 12, fontWeight: 700, color: 'var(--red)' }}>
+                                  PDF
+                                </div>
+                              ) : (
+                                <img src={url} alt={fileName}
+                                  style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }}
+                                  onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                              )}
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {fileName}
+                                </div>
+                                <div style={{ fontSize: 11, color: 'var(--action)', marginTop: 2 }}>Clique para abrir</div>
+                              </div>
+                            </a>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             )
           })()}

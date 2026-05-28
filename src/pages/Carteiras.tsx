@@ -4,7 +4,8 @@ import { useAuth, hasAnyRole } from '@/lib/authContext'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase/client'
 import { getMbClientes, invalidateMbCache } from '@/lib/mbCache'
-import { RefreshCw, Search, TrendingUp, DollarSign, MessageSquare, Zap, Tag, CheckCircle, X } from 'lucide-react'
+import { GOALS } from '@/lib/goals'
+import { RefreshCw, Search, TrendingUp, DollarSign, MessageSquare, Zap, Tag, CheckCircle, X, Download, Database, Loader2 } from 'lucide-react'
 import { useToast } from '../../components/ui/Toast'
 
 interface Nota {
@@ -14,6 +15,19 @@ interface Nota {
   observacao: string
   proxima_acao: string
   data_contato: string
+}
+
+// Alias de nomes de gerentes (Metabase → exibição)
+const GERENTE_ALIAS: Record<string, string> = {
+  'Isaac': 'Carlos Eduardo',
+}
+const gerenteNome = (nome: string) => GERENTE_ALIAS[nome] ?? nome
+
+// Tier fixo por gerente (nome exibido após alias)
+const GERENTE_TIER: Record<string, 'starter' | 'growth' | 'enterprise'> = {
+  'Carlos Eduardo': 'starter',
+  'Gabriel Bairros': 'growth',
+  'Rafael Mendes':   'enterprise',
 }
 
 interface CarteiraCli {
@@ -68,9 +82,11 @@ function CarteirasContent() {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [search, setSearch]           = useState('')
   const [filterCart, setFilterCart]   = useState('todas')
-  const [sort, setSort]               = useState<'faturamento' | 'tpv' | 'nome' | 'pct' | 'tpv_total'>('pct')
+  const [sort, setSort]               = useState<'faturamento' | 'tpv' | 'nome' | 'pct' | 'tpv_total' | 'prev'>('pct')
+  const [sortDir, setSortDir]         = useState<'desc' | 'asc'>('desc')
   const [filterPct, setFilterPct]     = useState<'todos' | 'verde' | 'amarelo' | 'vermelho' | 'critico'>('todos')
   const [filterTpvTotal, setFilterTpvTotal] = useState<'todos' | '100k' | '500k' | '1m' | '2m'>('todos')
+  const [filterPrev,     setFilterPrev]     = useState<'todos' | '5k' | '10k' | '30k' | '50k'>('todos')
   const [filterPeriodo, setFilterPeriodo]   = useState<'todos' | 'mes' | '30d'>('todos')
   const [modalCli, setModalCli]       = useState<CarteiraCli | null>(null)
   const [notaForm, setNotaForm]       = useState<Omit<Nota,'email'>>({ motivo: '', observacao: '', proxima_acao: '', data_contato: '' })
@@ -82,6 +98,105 @@ function CarteirasContent() {
   const [tagSelecionada, setTagSelecionada] = useState('')
   const [isCampanha, setIsCampanha]       = useState(false)
   const [resultCampanha, setResultCampanha] = useState<any>(null)
+
+  // Sincronizar CRM
+  type SyncResult = {
+    email: string; client: string; tier: string | null; gerente: string
+    status: 'ok' | 'error' | 'skip'; leadAction?: string; leadId?: string
+    bizAction?: string; bizId?: string; bizStage?: string
+    tagAdded?: string; error?: string; steps?: string[]
+  }
+  type SyncStats = {
+    total: number; ok: number; errors: number; skipped: number
+    leadsCreated: number; bizCreated: number; bizExisting: number
+    starter: number; growth: number; enterprise: number
+    pipelinesFound?: Record<string, string>
+    pipelineErrors?: string[]
+  }
+  const [modalSync,    setModalSync]    = useState(false)
+  const [syncLoading,  setSyncLoading]  = useState(false)
+  const [syncStats,    setSyncStats]    = useState<SyncStats | null>(null)
+  const [syncResults,  setSyncResults]  = useState<SyncResult[]>([])
+  const [syncError,    setSyncError]    = useState<string | null>(null)
+  const [syncScope,    setSyncScope]    = useState<'filtrado' | 'todos'>('todos')
+  const [syncProgress, setSyncProgress] = useState({ done: 0, total: 0, batch: 0, batches: 0 })
+  const BATCH_SIZE = 25 // cada lote processa ≤25 clientes (~35s por lote, bem dentro do timeout de 150s)
+
+  async function runSyncCRM() {
+    setSyncLoading(true)
+    setSyncStats(null)
+    setSyncResults([])
+    setSyncError(null)
+
+    const lista = syncScope === 'filtrado' ? filtered : clientes
+    const allClients = lista.map(c => ({
+      email:                c.email,
+      nome:                 c.nome,
+      telefone:             c.telefone ?? null,
+      gerente:              gerenteNome(c.gerente),
+      previsao_faturamento: c.previsao_faturamento ?? 0,
+      tpv_mes:              c.tpv_mes ?? 0,
+    }))
+
+    // Divide em lotes
+    const batches: typeof allClients[] = []
+    for (let i = 0; i < allClients.length; i += BATCH_SIZE)
+      batches.push(allClients.slice(i, i + BATCH_SIZE))
+
+    setSyncProgress({ done: 0, total: allClients.length, batch: 0, batches: batches.length })
+
+    const accResults: SyncResult[] = []
+    let accStats: SyncStats = { total: 0, ok: 0, errors: 0, skipped: 0, leadsCreated: 0, bizCreated: 0, bizExisting: 0, starter: 0, growth: 0, enterprise: 0, pipelinesFound: {} }
+    let firstError: string | null = null
+
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
+    const { data: { session } } = await supabase.auth.getSession()
+    const authToken = session?.access_token ?? import.meta.env.VITE_SUPABASE_ANON_KEY
+
+    for (let b = 0; b < batches.length; b++) {
+      setSyncProgress(p => ({ ...p, batch: b + 1, done: b * BATCH_SIZE }))
+      try {
+        const res = await fetch(`${supabaseUrl}/functions/v1/bulk-sync-gc`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+          body: JSON.stringify({ clients: batches[b] }),
+        })
+        const bData = await res.json().catch(() => ({ success: false, error: `HTTP ${res.status} — resposta não é JSON` }))
+        if (!res.ok || !bData?.success) {
+          firstError = `Lote ${b + 1} (HTTP ${res.status}): ${bData?.error ?? bData?.message ?? JSON.stringify(bData).slice(0, 300)}`
+          break
+        }
+
+        // Acumula resultados
+        const br: SyncResult[] = bData.results ?? []
+        accResults.push(...br)
+        const bs: SyncStats = bData.stats ?? {}
+        accStats = {
+          total:         accStats.total         + (bs.total         ?? 0),
+          ok:            accStats.ok            + (bs.ok            ?? 0),
+          errors:        accStats.errors        + (bs.errors        ?? 0),
+          skipped:       accStats.skipped       + (bs.skipped       ?? 0),
+          leadsCreated:  accStats.leadsCreated  + (bs.leadsCreated  ?? 0),
+          bizCreated:    accStats.bizCreated    + (bs.bizCreated    ?? 0),
+          bizExisting:   accStats.bizExisting   + (bs.bizExisting   ?? 0),
+          starter:       accStats.starter       + (bs.starter       ?? 0),
+          growth:        accStats.growth        + (bs.growth        ?? 0),
+          enterprise:    accStats.enterprise    + (bs.enterprise    ?? 0),
+          pipelinesFound: bs.pipelinesFound ?? accStats.pipelinesFound,
+        }
+        setSyncResults([...accResults])
+        setSyncStats({ ...accStats })
+        setSyncProgress(p => ({ ...p, done: Math.min((b + 1) * BATCH_SIZE, allClients.length) }))
+      } catch (e) {
+        firstError = `Lote ${b + 1}: ${String(e)}`
+        break
+      }
+    }
+
+    if (firstError) setSyncError(firstError)
+    else toast(`Sincronização concluída: ${accStats.bizCreated} negócios criados ✓`, 'success')
+    setSyncLoading(false)
+  }
 
   useEffect(() => { loadData() }, [])
 
@@ -99,6 +214,40 @@ function CarteirasContent() {
     }
     setIsLoading(false)
   }
+
+  function exportCsv() {
+    const BRL = (v: number | null) => v != null ? v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 2 }) : ''
+    const esc = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`
+    const headers = ['Cliente', 'Email', 'Telefone', 'Gerente', 'TPV Total', 'Prev. Fat.', 'TPV Mês', '% Atingido', 'Últ. Venda']
+    const rows = filtered.map(c => {
+      const pct = c.previsao_faturamento > 0 ? (getTpvPeriodo(c) / c.previsao_faturamento * 100) : null
+      return [
+        esc(c.nome),
+        esc(c.email),
+        esc(c.telefone ?? ''),
+        esc(gerenteNome(c.gerente)),
+        esc(BRL(c.tpv_total ?? null)),
+        esc(BRL(c.previsao_faturamento)),
+        esc(BRL(getTpvPeriodo(c))),
+        pct != null ? esc(pct.toFixed(1) + '%') : esc(''),
+        esc(c.ultima_venda ?? ''),
+      ].join(';')
+    })
+    const csv = '﻿' + [headers.map(h => esc(h)).join(';'), ...rows].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href     = url
+    a.download = `carteiras_${new Date().toISOString().slice(0,10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function toggleSort(col: typeof sort) {
+    if (sort === col) setSortDir(d => d === 'desc' ? 'asc' : 'desc')
+    else { setSort(col); setSortDir('desc') }
+  }
+
 
   async function refresh() {
     setIsRefreshing(true)
@@ -195,6 +344,14 @@ function CarteirasContent() {
       return true
     })
     .filter(c => {
+      const p = c.previsao_faturamento ?? 0
+      if (filterPrev === '5k')  return p >= 5_000
+      if (filterPrev === '10k') return p >= 10_000
+      if (filterPrev === '30k') return p >= 30_000
+      if (filterPrev === '50k') return p >= 50_000
+      return true
+    })
+    .filter(c => {
       if (filterPeriodo === 'todos') return true
       if (!c.ultima_venda) return false
       const venda = new Date(c.ultima_venda)
@@ -209,11 +366,13 @@ function CarteirasContent() {
       return true
     })
     .sort((a, b) => {
-      if (sort === 'nome')      return a.nome.localeCompare(b.nome)
-      if (sort === 'tpv')       return getTpvPeriodo(b) - getTpvPeriodo(a)
-      if (sort === 'tpv_total') return (b.tpv_total ?? 0) - (a.tpv_total ?? 0)
-      if (sort === 'pct')       return (getPct(b) ?? -1) - (getPct(a) ?? -1)
-      return b.faturamento - a.faturamento
+      const d = sortDir === 'asc' ? 1 : -1
+      if (sort === 'nome')      return d * a.nome.localeCompare(b.nome)
+      if (sort === 'tpv')       return d * (getTpvPeriodo(a) - getTpvPeriodo(b))
+      if (sort === 'tpv_total') return d * ((a.tpv_total ?? 0) - (b.tpv_total ?? 0))
+      if (sort === 'pct')       return d * ((getPct(a) ?? -1) - (getPct(b) ?? -1))
+      if (sort === 'prev')      return d * ((a.previsao_faturamento ?? 0) - (b.previsao_faturamento ?? 0))
+      return d * (a.faturamento - b.faturamento)
     })
 
   // resumo por gerente
@@ -280,24 +439,48 @@ function CarteirasContent() {
           <div style={{ display: 'grid', gridTemplateColumns: `repeat(${gcNome ? 1 : resumo.length}, 1fr)`, gap: 14, marginBottom: 24 }}>
             {resumo.filter(r => gcNome ? r.gerente === gcNome : true).map(r => {
               const pct = r.prev_total > 0 ? r.tpv_total / r.prev_total * 100 : null
-              const [pbg, pfg] = !pct ? ['transparent','var(--text2)'] : pct >= 80 ? ['#34C75918','#34C759'] : pct >= 50 ? ['#FF9F0A18','#FF9F0A'] : ['#FF3B3018','#FF3B30']
+              // Tier fixo por gerente
+              const tier = GERENTE_TIER[gerenteNome(r.gerente)] ?? 'starter'
+              const metaTier = tier === 'enterprise' ? GOALS.gc.enterprise : tier === 'growth' ? GOALS.gc.growth : GOALS.gc.starter
+              const metaPct  = metaTier * 100
+              const [pbg, pfg] = !pct ? ['transparent','var(--text2)']
+                : pct >= metaPct ? ['#34C75918','#34C759']
+                : pct >= metaPct * 0.7 ? ['#FF9F0A18','#FF9F0A']
+                : ['#FF3B3018','#FF3B30']
               const active = filterCart === r.gerente
+              const TIER_COLORS: Record<string, string> = { starter: '#07BA1C', growth: '#2BB9FF', enterprise: '#BF5AF2' }
               return (
                 <div key={r.gerente} onClick={() => !gcNome && setFilterCart(active ? 'todas' : r.gerente)}
                   style={{ background: 'var(--bg-card)', border: `1.5px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
                     borderRadius: 14, padding: '18px 20px', cursor: 'pointer', transition: 'border .15s' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                     <div>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 4 }}>{r.gerente}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.05em' }}>{gerenteNome(r.gerente)}</div>
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 10, background: `${TIER_COLORS[tier]}22`, color: TIER_COLORS[tier], textTransform: 'capitalize' }}>{tier}</span>
+                      </div>
                       <div style={{ fontSize: 24, fontWeight: 800 }}>{r.total}</div>
                       <div style={{ fontSize: 11, color: 'var(--text2)' }}>clientes</div>
                     </div>
                     {pct !== null && (
-                      <span style={{ background: pbg, color: pfg, fontSize: 13, fontWeight: 800, padding: '4px 10px', borderRadius: 20 }}>
-                        {Math.min(pct, 999).toFixed(1)}%
-                      </span>
+                      <div style={{ textAlign: 'right' }}>
+                        <span style={{ background: pbg, color: pfg, fontSize: 13, fontWeight: 800, padding: '4px 10px', borderRadius: 20, display: 'block' }}>
+                          {Math.min(pct, 999).toFixed(1)}%
+                        </span>
+                        <span style={{ fontSize: 10, color: 'var(--text2)', marginTop: 3, display: 'block' }}>meta {metaPct.toFixed(0)}%</span>
+                      </div>
                     )}
                   </div>
+                  {/* Barra de progresso em relação à meta */}
+                  {pct !== null && (
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ height: 6, background: 'var(--bg-card2)', borderRadius: 20, overflow: 'hidden', position: 'relative' }}>
+                        <div style={{ height: '100%', width: `${Math.min(pct, 100)}%`, background: pfg, borderRadius: 20, transition: 'width .4s' }} />
+                        {/* Marcador da meta */}
+                        <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${metaPct}%`, width: 2, background: 'var(--text2)', opacity: 0.5 }} />
+                      </div>
+                    </div>
+                  )}
                   <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
                       <span style={{ color: 'var(--text2)', display: 'flex', alignItems: 'center', gap: 5 }}><TrendingUp size={12} color="#BF5AF2" /> Prev. Fat.</span>
@@ -379,12 +562,25 @@ function CarteirasContent() {
               <option value="1m">TPV Total ≥ R$ 1M</option>
               <option value="2m">TPV Total ≥ R$ 2M</option>
             </select>
-            <select value={sort} onChange={e => setSort(e.target.value as any)} style={{ ...inp, cursor: 'pointer' }}>
-              <option value="pct">↓ % Atingido</option>
-              <option value="tpv">↓ TPV mês</option>
-              <option value="tpv_total">↓ TPV Total</option>
-              <option value="nome">A→Z Nome</option>
+            <select value={filterPrev} onChange={e => setFilterPrev(e.target.value as any)} style={{ ...inp, cursor: 'pointer', color: filterPrev !== 'todos' ? '#BF5AF2' : undefined, fontWeight: filterPrev !== 'todos' ? 700 : undefined }}>
+              <option value="todos">Prev. Fat.: Todos</option>
+              <option value="5k">Prev. Fat. ≥ R$ 5k</option>
+              <option value="10k">Prev. Fat. ≥ R$ 10k</option>
+              <option value="30k">Prev. Fat. ≥ R$ 30k</option>
+              <option value="50k">Prev. Fat. ≥ R$ 50k</option>
             </select>
+            {/* Botão export CSV */}
+            {!isLoading && filtered.length > 0 && (
+              <button onClick={exportCsv} style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)',
+                background: 'var(--bg-card)', color: 'var(--text2)', cursor: 'pointer',
+                fontFamily: 'inherit', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+              }}>
+                <Download size={13} />
+                Exportar CSV ({filtered.length})
+              </button>
+            )}
 
             {/* Botão campanha */}
             {!isLoading && filtered.length > 0 && (
@@ -399,6 +595,20 @@ function CarteirasContent() {
                 Criar Campanha ({filtered.length})
               </button>
             )}
+
+            {/* Botão Sincronizar CRM */}
+            {!isLoading && isAdmin && clientes.length > 0 && (
+              <button onClick={() => { setModalSync(true); setSyncStats(null); setSyncResults([]); setSyncError(null) }} style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '8px 14px', borderRadius: 8, border: '1px solid #BF5AF2',
+                background: 'color-mix(in srgb, #BF5AF2 12%, var(--bg-card))',
+                color: '#BF5AF2', cursor: 'pointer', fontFamily: 'inherit',
+                fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap',
+              }}>
+                <Database size={13} />
+                Sincronizar CRM
+              </button>
+            )}
           </div>
         </div>
 
@@ -411,19 +621,24 @@ function CarteirasContent() {
               <thead>
                 <tr style={{ background: 'var(--bg-card2)' }}>
                   {[
-                    { label: 'Cliente',      align: 'left'  },
-                    { label: 'Contato',      align: 'left'  },
-                    { label: 'Gerente',      align: 'left'  },
-                    { label: 'TPV Total',    align: 'right' },
-                    { label: 'Prev. Fat.',   align: 'right' },
-                    { label: tpvColLabel,    align: 'right' },
-                    { label: '% Atingido',   align: 'center'},
-                    { label: 'Últ. Venda',   align: 'left'  },
-                    { label: '',             align: 'left'  },
+                    { label: 'Cliente',     align: 'left',   col: 'nome'      },
+                    { label: 'Contato',     align: 'left',   col: null        },
+                    { label: 'Gerente',     align: 'left',   col: null        },
+                    { label: 'TPV Total',   align: 'right',  col: 'tpv_total' },
+                    { label: 'Prev. Fat.',  align: 'right',  col: 'prev'      },
+                    { label: tpvColLabel,   align: 'right',  col: 'tpv'       },
+                    { label: '% Atingido',  align: 'center', col: 'pct'       },
+                    { label: 'Últ. Venda',  align: 'left',   col: null        },
+                    { label: '',            align: 'left',   col: null        },
                   ].map(h => (
-                    <th key={h.label} style={{ padding: '11px 16px', textAlign: h.align as any,
-                      fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase',
-                      letterSpacing: '.05em', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{h.label}</th>
+                    <th key={h.label} onClick={h.col ? () => toggleSort(h.col as typeof sort) : undefined}
+                      style={{ padding: '11px 16px', textAlign: h.align as any,
+                        fontSize: 11, fontWeight: 700, color: h.col && sort === h.col ? 'var(--text)' : 'var(--text2)',
+                        textTransform: 'uppercase', letterSpacing: '.05em', whiteSpace: 'nowrap',
+                        borderBottom: '1px solid var(--border)',
+                        cursor: h.col ? 'pointer' : 'default', userSelect: 'none' }}>
+                      {h.label}{h.col && sort === h.col ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''}
+                    </th>
                   ))}
                 </tr>
               </thead>
@@ -448,7 +663,7 @@ function CarteirasContent() {
                     </td>
                     <td style={{ padding: '12px 16px' }}>
                       <span style={{ background: 'var(--bg-card2)', border: '1px solid var(--border)', padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                        {c.gerente}
+                        {gerenteNome(c.gerente)}
                       </span>
                     </td>
                     <td style={{ padding: '12px 16px', textAlign: 'right', color: '#F59E0B', fontWeight: 700, fontSize: 13 }}>
@@ -493,6 +708,357 @@ function CarteirasContent() {
           </div>
         )}
       </div>
+
+      {/* ── Modal: Sincronizar CRM DataCrazy ── */}
+      {modalSync && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, background: '#0009', zIndex: 200 }}
+            onClick={() => { if (!syncLoading) setModalSync(false) }} />
+          <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+            zIndex: 201, width: 'min(760px, 94vw)', maxHeight: '82vh',
+            background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 20,
+            boxShadow: '0 24px 80px rgba(0,0,0,.5)', display: 'flex', flexDirection: 'column',
+            animation: 'scaleIn .22s cubic-bezier(.34,1.56,.64,1)' }}>
+
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '20px 24px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10,
+                  background: 'color-mix(in srgb,#BF5AF2 18%,var(--bg-card2))',
+                  border: '1px solid #BF5AF240', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Database size={18} color="#BF5AF2" />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: 17 }}>Sincronizar Carteira → DataCrazy</div>
+                  <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 1 }}>
+                    Cria negócios nos pipelines GC Starter · GC Growth · GC Enterprise
+                  </div>
+                </div>
+              </div>
+              {!syncLoading && (
+                <button onClick={() => setModalSync(false)} style={{
+                  background: 'var(--bg-card2)', border: '1px solid var(--border)', borderRadius: 8,
+                  padding: '4px 10px', fontSize: 18, cursor: 'pointer', color: 'var(--text2)',
+                  lineHeight: 1, fontFamily: 'inherit' }}>×</button>
+              )}
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+              {/* Seleção de escopo + info pré-sync */}
+              {!syncLoading && !syncStats && !syncError && (
+                <>
+                  {/* Mapeamento GC */}
+                  <div style={{ background: 'color-mix(in srgb,#BF5AF2 7%,var(--bg-card2))',
+                    border: '1px solid color-mix(in srgb,#BF5AF2 25%,var(--border))',
+                    borderRadius: 12, padding: '14px 16px', fontSize: 13, lineHeight: 1.65 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 8, color: '#BF5AF2' }}>Pipeline por gerente:</div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {[
+                        { label: 'Carlos Eduardo', tier: 'GC Starter',    color: '#07BA1C' },
+                        { label: 'Gabriel Bairros', tier: 'GC Growth',    color: '#2BB9FF' },
+                        { label: 'Rafael Mendes',   tier: 'GC Enterprise', color: '#BF5AF2' },
+                      ].map(g => (
+                        <div key={g.label} style={{ display: 'flex', alignItems: 'center', gap: 6,
+                          padding: '6px 12px', borderRadius: 20,
+                          background: `color-mix(in srgb,${g.color} 10%,var(--bg-card2))`,
+                          border: `1px solid color-mix(in srgb,${g.color} 35%,transparent)` }}>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{g.label}</span>
+                          <span style={{ fontSize: 10, color: 'var(--text2)' }}>→</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: g.color }}>{g.tier}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text2)', lineHeight: 1.6 }}>
+                      • Lead buscado por e-mail → fallback telefone → criado se não existir<br/>
+                      • Tag GC adicionada ao lead &nbsp;•&nbsp; Negócio criado no pipeline correto (sem duplicar)
+                    </div>
+                  </div>
+
+                  {/* Escopo */}
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {[
+                      { v: 'todos', label: `Toda a carteira (${clientes.length} clientes)` },
+                      { v: 'filtrado', label: `Apenas filtro atual (${filtered.length} clientes)` },
+                    ].map(({ v, label }) => (
+                      <button key={v} onClick={() => setSyncScope(v as any)} style={{
+                        flex: 1, padding: '10px 14px', borderRadius: 10, cursor: 'pointer',
+                        fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
+                        border: `1.5px solid ${syncScope === v ? '#BF5AF2' : 'var(--border)'}`,
+                        background: syncScope === v ? 'color-mix(in srgb,#BF5AF2 10%,var(--bg-card2))' : 'var(--bg-card2)',
+                        color: syncScope === v ? '#BF5AF2' : 'var(--text2)',
+                        transition: 'all .15s',
+                      }}>{label}</button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {/* Loading */}
+              {syncLoading && (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '28px 0' }}>
+                  <Loader2 size={38} style={{ animation: 'spin 1s linear infinite', color: '#BF5AF2' }} />
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
+                      Lote {syncProgress.batch} de {syncProgress.batches}
+                    </div>
+                    <div style={{ fontSize: 13, color: 'var(--text2)' }}>
+                      {syncProgress.done} de {syncProgress.total} clientes processados
+                    </div>
+                  </div>
+                  {/* Barra de progresso */}
+                  <div style={{ width: '100%', maxWidth: 360 }}>
+                    <div style={{ height: 8, background: 'var(--bg-card2)', borderRadius: 99, overflow: 'hidden', border: '1px solid var(--border)' }}>
+                      <div style={{
+                        height: '100%', borderRadius: 99, transition: 'width .4s ease',
+                        background: 'linear-gradient(90deg,#BF5AF2,#9B59B2)',
+                        width: syncProgress.total > 0 ? `${Math.round(syncProgress.done / syncProgress.total * 100)}%` : '0%',
+                      }} />
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 11, color: 'var(--text2)' }}>
+                      <span>{syncProgress.total > 0 ? Math.round(syncProgress.done / syncProgress.total * 100) : 0}%</span>
+                      <span>Não feche esta janela</span>
+                    </div>
+                  </div>
+                  {/* Resultados parciais em tempo real */}
+                  {syncResults.length > 0 && (
+                    <div style={{ fontSize: 12, color: 'var(--text2)', display: 'flex', gap: 16 }}>
+                      <span style={{ color: '#34C759', fontWeight: 700 }}>✦ {syncResults.filter(r => r.bizAction === 'created').length} criados</span>
+                      <span style={{ color: 'var(--action)', fontWeight: 700 }}>~ {syncResults.filter(r => r.bizAction === 'already_exists').length} existiam</span>
+                      {syncResults.filter(r => r.status === 'error').length > 0 && (
+                        <span style={{ color: 'var(--red)', fontWeight: 700 }}>✕ {syncResults.filter(r => r.status === 'error').length} erros</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Erro */}
+              {syncError && (
+                <div style={{ background: 'color-mix(in srgb,var(--red) 10%,var(--bg-card2))',
+                  border: '1px solid color-mix(in srgb,var(--red) 35%,var(--border))',
+                  borderRadius: 12, padding: '14px 16px', fontSize: 13, color: 'var(--red)', fontWeight: 600 }}>
+                  ✕ {syncError}
+                </div>
+              )}
+
+              {/* Stats */}
+              {syncStats && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {syncStats.pipelinesFound && Object.keys(syncStats.pipelinesFound).length > 0 && (
+                    <div style={{ background: 'var(--bg-card2)', border: '1px solid var(--border)',
+                      borderRadius: 10, padding: '10px 14px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
+                        Pipelines mapeados:
+                      </span>
+                      {Object.entries(syncStats.pipelinesFound).map(([tier, name]) => {
+                        const c = tier.includes('Starter') ? '#07BA1C' : tier.includes('Growth') ? '#2BB9FF' : '#BF5AF2'
+                        return (
+                          <span key={tier} style={{ fontSize: 12, padding: '2px 9px', borderRadius: 20,
+                            background: `color-mix(in srgb,${c} 15%,transparent)`, color: c, fontWeight: 700 }}>
+                            {tier} → {name}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  )}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
+                    {([
+                      { label: 'Total Carteira',    value: syncStats.total,        color: 'var(--text2)' },
+                      { label: 'Negócios Criados',  value: syncStats.bizCreated,   color: '#34C759' },
+                      { label: 'Já Existiam',        value: syncStats.bizExisting,  color: 'var(--action)' },
+                      { label: 'Leads Criados',      value: syncStats.leadsCreated, color: 'var(--cyan)' },
+                      { label: 'Erros',              value: syncStats.errors,       color: syncStats.errors > 0 ? 'var(--red)' : 'var(--text2)' },
+                      { label: 'Starter / Growth / Enterprise', value: `${syncStats.starter} / ${syncStats.growth} / ${syncStats.enterprise}`, color: 'var(--text2)' },
+                    ] as const).map(k => (
+                      <div key={k.label} style={{ background: 'var(--bg-card2)', border: '1px solid var(--border)',
+                        borderRadius: 10, padding: '12px 14px', textAlign: 'center' }}>
+                        <div style={{ fontSize: 22, fontWeight: 800, color: k.color }}>{k.value}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 3, fontWeight: 600 }}>{k.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Alertas de pipeline não encontrado */}
+              {syncStats?.pipelineErrors && syncStats.pipelineErrors.length > 0 && (
+                <div style={{ background: 'color-mix(in srgb,var(--orange) 10%,var(--bg-card2))',
+                  border: '1px solid color-mix(in srgb,var(--orange) 35%,var(--border))',
+                  borderRadius: 10, padding: '12px 14px' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--orange)', marginBottom: 6 }}>⚠ Avisos de Pipeline</div>
+                  {syncStats.pipelineErrors.map((e, i) => (
+                    <div key={i} style={{ fontSize: 12, color: 'var(--text2)', marginTop: 3 }}>• {e}</div>
+                  ))}
+                </div>
+              )}
+
+              {/* Tabela de resultados + aba de erros */}
+              {syncResults.length > 0 && (() => {
+                const errRows   = syncResults.filter(r => r.status === 'error')
+                const okRows    = syncResults.filter(r => r.status === 'ok')
+                const skipRows  = syncResults.filter(r => r.status === 'skip')
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {/* Aba de resultados OK */}
+                    <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+                      <div style={{ background: 'var(--bg-card2)', padding: '8px 14px', fontSize: 11,
+                        fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em',
+                        borderBottom: '1px solid var(--border)', display: 'flex', gap: 14 }}>
+                        <span style={{ color: '#34C759' }}>✓ {okRows.length} OK</span>
+                        <span>~ {syncResults.filter(r => r.bizAction === 'already_exists').length} já existiam</span>
+                        <span style={{ color: 'var(--cyan)' }}>✦ {syncResults.filter(r => r.leadAction === 'created').length} leads criados</span>
+                        {skipRows.length > 0 && <span style={{ color: 'var(--text2)' }}>{skipRows.length} ignorados</span>}
+                      </div>
+                      <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                          <thead>
+                            <tr style={{ background: 'var(--bg-card2)', position: 'sticky', top: 0 }}>
+                              {['Cliente', 'Gerente / Tier', 'Lead', 'Negócio / Stage', 'Tag'].map(col => (
+                                <th key={col} style={{ padding: '7px 10px', textAlign: 'left', fontSize: 10,
+                                  fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase',
+                                  letterSpacing: '.05em', borderBottom: '1px solid var(--border)' }}>{col}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {syncResults.filter(r => r.status !== 'error').map((r, i) => {
+                              const tc = r.tier === 'GC Starter' ? '#07BA1C' : r.tier === 'GC Growth' ? '#2BB9FF' : r.tier === 'GC Enterprise' ? '#BF5AF2' : 'var(--text2)'
+                              const LL: Record<string,string> = { created: '✦ Criado', found_email: '✓ Email', found_phone: '✓ Tel' }
+                              const BL: Record<string,string> = { created: '✦ Criado', already_exists: '~ Existia' }
+                              return (
+                                <tr key={i} style={{ borderBottom: '1px solid var(--border)', opacity: r.status === 'skip' ? 0.4 : 1 }}>
+                                  <td style={{ padding: '8px 10px' }}>
+                                    <div style={{ fontWeight: 600, fontSize: 12 }}>{r.client}</div>
+                                    <div style={{ fontSize: 10, color: 'var(--text2)' }}>{r.email}</div>
+                                  </td>
+                                  <td style={{ padding: '8px 10px' }}>
+                                    <div style={{ fontSize: 11, color: 'var(--text2)' }}>{r.gerente}</div>
+                                    {r.tier
+                                      ? <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 20,
+                                          background: `color-mix(in srgb,${tc} 14%,var(--bg-card2))`, color: tc }}>
+                                          {r.tier.replace('GC ','')}
+                                        </span>
+                                      : <span style={{ fontSize: 10, color: 'var(--text2)' }}>—</span>}
+                                  </td>
+                                  <td style={{ padding: '8px 10px', fontWeight: 600,
+                                    color: r.leadAction === 'created' ? 'var(--cyan)' : '#34C759' }}>
+                                    {r.leadAction ? (LL[r.leadAction] ?? r.leadAction) : '—'}
+                                  </td>
+                                  <td style={{ padding: '8px 10px' }}>
+                                    <span style={{ fontWeight: 600,
+                                      color: r.bizAction === 'created' ? '#34C759' : r.bizAction === 'already_exists' ? 'var(--action)' : 'var(--text2)' }}>
+                                      {r.bizAction ? (BL[r.bizAction] ?? r.bizAction) : '—'}
+                                    </span>
+                                    {r.bizStage && <div style={{ fontSize: 10, color: 'var(--text2)' }}>{r.bizStage}</div>}
+                                  </td>
+                                  <td style={{ padding: '8px 10px', fontSize: 11,
+                                    color: r.tagAdded ? tc : 'var(--text2)' }}>
+                                    {r.tagAdded ? r.tagAdded.replace('GC ','') : '—'}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Relatório de erros */}
+                    {errRows.length > 0 && (
+                      <div style={{ border: '1px solid color-mix(in srgb,var(--red) 40%,var(--border))',
+                        borderRadius: 12, overflow: 'hidden' }}>
+                        <div style={{ background: 'color-mix(in srgb,var(--red) 8%,var(--bg-card2))',
+                          padding: '10px 14px', borderBottom: '1px solid color-mix(in srgb,var(--red) 30%,var(--border))',
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--red)' }}>
+                            ✕ Relatório de Erros — {errRows.length} cliente{errRows.length > 1 ? 's' : ''}
+                          </span>
+                          <button
+                            onClick={() => {
+                              const txt = errRows.map(r => `${r.client} <${r.email}> [${r.tier ?? 'sem tier'}]\n  → ${r.error}`).join('\n\n')
+                              navigator.clipboard.writeText(txt).catch(() => {})
+                              toast('Erros copiados!', 'success')
+                            }}
+                            style={{ fontSize: 11, padding: '3px 10px', borderRadius: 6,
+                              border: '1px solid color-mix(in srgb,var(--red) 40%,var(--border))',
+                              background: 'transparent', color: 'var(--red)', cursor: 'pointer',
+                              fontFamily: 'inherit', fontWeight: 600 }}>
+                            Copiar
+                          </button>
+                        </div>
+                        <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                          {errRows.map((r, i) => {
+                            const tc = r.tier === 'GC Starter' ? '#07BA1C' : r.tier === 'GC Growth' ? '#2BB9FF' : r.tier === 'GC Enterprise' ? '#BF5AF2' : 'var(--text2)'
+                            return (
+                              <div key={i} style={{ padding: '12px 14px',
+                                borderBottom: i < errRows.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                                  <div style={{ flex: 1 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+                                      <span style={{ fontWeight: 700, fontSize: 13 }}>{r.client}</span>
+                                      {r.tier && (
+                                        <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 20,
+                                          background: `color-mix(in srgb,${tc} 14%,var(--bg-card2))`, color: tc }}>
+                                          {r.tier.replace('GC ','')}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 5 }}>{r.email} · {r.gerente}</div>
+                                    <div style={{ fontSize: 12, color: 'var(--red)',
+                                      background: 'color-mix(in srgb,var(--red) 6%,var(--bg-card2))',
+                                      border: '1px solid color-mix(in srgb,var(--red) 20%,var(--border))',
+                                      borderRadius: 8, padding: '7px 10px',
+                                      fontFamily: 'monospace', lineHeight: 1.5, wordBreak: 'break-all' }}>
+                                      {r.error}
+                                    </div>
+                                    {r.steps && r.steps.length > 0 && (
+                                      <div style={{ fontSize: 10, color: 'var(--text2)', marginTop: 4 }}>
+                                        Passos: {r.steps.join(' · ')}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '14px 24px', borderTop: '1px solid var(--border)',
+              display: 'flex', justifyContent: 'flex-end', gap: 10, flexShrink: 0 }}>
+              {!syncLoading && (
+                <button onClick={() => setModalSync(false)} style={{
+                  padding: '8px 18px', borderRadius: 8, border: '1px solid var(--border)',
+                  background: 'var(--bg-card2)', color: 'var(--text)', fontSize: 14,
+                  fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  Fechar
+                </button>
+              )}
+              <button onClick={runSyncCRM} disabled={syncLoading} style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '8px 22px', borderRadius: 8,
+                border: 'none',
+                background: syncLoading ? 'var(--border)' : 'linear-gradient(135deg,#BF5AF2,#9B59B2)',
+                color: '#fff', fontSize: 14, fontWeight: 700,
+                cursor: syncLoading ? 'default' : 'pointer',
+                fontFamily: 'inherit', opacity: syncLoading ? 0.7 : 1 }}>
+                {syncLoading
+                  ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Sincronizando…</>
+                  : <><Database size={14} /> {syncStats ? 'Sincronizar Novamente' : `Iniciar · ${syncScope === 'todos' ? clientes.length : filtered.length} clientes`}</>}
+              </button>
+            </div>
+          </div>
+          <style>{`@keyframes scaleIn{from{opacity:0;transform:translate(-50%,-50%) scale(.95)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}} @keyframes spin{to{transform:rotate(360deg)}}`}</style>
+        </>
+      )}
 
       {/* Modal de campanha DataCrazy */}
       {modalCampanha && (

@@ -6,11 +6,13 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Avatar } from '@/components/ui/Avatar'
 import { supabase } from '@/lib/supabase/client'
+import { getMbClientes } from '@/lib/mbCache'
 import { BarChartH } from '@/components/ui/charts/BarChartH'
 import { BarChartV } from '@/components/ui/charts/BarChartV'
 import { LineAreaChart } from '@/components/ui/charts/LineAreaChart'
 import { DonutChart } from '@/components/ui/charts/DonutChart'
 import { ChevronLeft, RefreshCw, Loader2, Users, Zap, Phone, TrendingUp } from 'lucide-react'
+import { GOALS, metaColor } from '@/lib/goals'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type DbUser       = { id: string; name: string; role: string; email: string; active: boolean }
@@ -20,6 +22,9 @@ type CarteiraNota = { email: string; motivo: string | null; data_contato: string
 type MbCliente    = { gerente: string; nome: string; email: string; tpv_mes: number | null; previsao_faturamento: number }
 
 const BRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
+
+const GERENTE_ALIAS: Record<string, string> = { 'Isaac': 'Carlos Eduardo' }
+const gerenteNome = (nome: string) => GERENTE_ALIAS[nome] ?? nome
 
 const COR = { verde: '#34C759', amarelo: '#FF9F0A', vermelho: '#FF3B30', azul: '#2997FF', roxo: '#BF5AF2' }
 
@@ -60,7 +65,7 @@ export default function RelatoriosAdmin({ onBack }: { onBack?: () => void } = {}
   const navigate = useNavigate()
   useEffect(() => { if (!loading && !user) navigate('/login') }, [user, loading, navigate])
   if (loading || !user) return null
-  if (!hasAnyRole(user, ['Admin'])) {
+  if (!hasAnyRole(user, ['Admin', 'Sócio'])) {
     return <><Header /><div style={{ textAlign: 'center', padding: 80, color: 'var(--text2)' }}>Acesso restrito.</div></>
   }
   return <RelatoriosContent onBack={onBack} />
@@ -68,7 +73,7 @@ export default function RelatoriosAdmin({ onBack }: { onBack?: () => void } = {}
 
 function RelatoriosContent({ onBack }: { onBack?: () => void }) {
   const [tab,        setTab]        = useState<TabKey>('geral')
-  const [preset,     setPreset]     = useState<Preset>('30d')
+  const [preset,     setPreset]     = useState<Preset>('mes')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo,   setCustomTo]   = useState('')
   const [isLoading,  setIsLoading]  = useState(true)
@@ -82,22 +87,26 @@ function RelatoriosContent({ onBack }: { onBack?: () => void }) {
 
   const { inicio, fim, label: rangeLabel } = getRange(preset, customFrom, customTo)
 
+  // Carrega dados do Metabase uma vez (cache 4h — não depende do filtro de data)
+  useEffect(() => {
+    getMbClientes().then(clientes => setMbClientes(clientes as MbCliente[]))
+  }, [])
+
+  // Carrega dados do Supabase quando o período muda
   useEffect(() => { load() }, [inicio, fim])
 
   async function load() {
     setIsLoading(true)
-    const [{ data: u }, { data: a }, { data: c }, { data: n }, mbRes] = await Promise.all([
+    const [{ data: u }, { data: a }, { data: c }, { data: n }] = await Promise.all([
       supabase.from('users').select('id,name,role,email,active').order('name'),
       supabase.from('activations').select('id,client,email,responsible,date,channel,faturamento_mensal,gerente_id,gc_status,welcome_sent').gte('date', inicio).lte('date', fim),
       supabase.from('calls').select('id,date,status,responsible,sdr_nome,client_email,ativado,motivo_nao_ativacao').gte('date', inicio).lte('date', fim),
       supabase.from('carteira_notas').select('email,motivo,data_contato'),
-      supabase.functions.invoke('mb-search', { body: {} }),
     ])
     if (u) setUsers(u as DbUser[])
     if (a) setActivations(a as Activation[])
     if (c) setCalls(c as Call[])
     if (n) setNotas(n as CarteiraNota[])
-    if (mbRes.data?.clientes) setMbClientes(mbRes.data.clientes as MbCliente[])
     setIsLoading(false)
   }
 
@@ -190,9 +199,9 @@ function RelatoriosContent({ onBack }: { onBack?: () => void }) {
           ))}
         </div>
 
-        {tab === 'geral'      && <TabGeral      activations={activations} calls={calls} users={users} inicio={inicio} fim={fim} card={card} lbl={lbl} />}
-        {tab === 'ativacoes'  && <TabAtivacoes  activations={activations} closers={closers} inicio={inicio} fim={fim} card={card} lbl={lbl} />}
-        {tab === 'calls'      && <TabCalls      calls={calls} sdrs={sdrs} inicio={inicio} fim={fim} card={card} lbl={lbl} />}
+        {tab === 'geral'      && <TabGeral      activations={activations} calls={calls} users={users} inicio={inicio} fim={fim} card={card} lbl={lbl} isMes={preset === 'mes'} />}
+        {tab === 'ativacoes'  && <TabAtivacoes  activations={activations} closers={closers} inicio={inicio} fim={fim} card={card} lbl={lbl} isMes={preset === 'mes'} />}
+        {tab === 'calls'      && <TabCalls      calls={calls} sdrs={sdrs} inicio={inicio} fim={fim} card={card} lbl={lbl} isMes={preset === 'mes'} />}
         {tab === 'carteiragc' && <TabCarteiraGC mbClientes={mbClientes} gerentes={gerentes} card={card} lbl={lbl} BRL={BRL} />}
         {tab === 'carteiras'  && <TabCarteiras  activations={activations} gerentes={gerentes} notaMap={notaMap} notas={notas} card={card} lbl={lbl} />}
 
@@ -222,7 +231,7 @@ function EmployeeFilter({ label, options, value, onChange }: {
           <button key={o.id} onClick={() => onChange(o.id)}
             style={{ padding: '5px 12px', borderRadius: 20, border: '1px solid var(--border)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
               background: value === o.id ? 'var(--action)' : 'var(--bg-card2)', color: value === o.id ? '#fff' : 'var(--text2)' }}>
-            {o.name.split(' ')[0]}
+            {o.name}
           </button>
         ))}
       </div>
@@ -243,7 +252,7 @@ function Kpi({ label, value, color, card }: { label: string; value: string | num
 // ══════════════════════════════════════════════════════════════════════════════
 // TAB: VISÃO GERAL
 // ══════════════════════════════════════════════════════════════════════════════
-function TabGeral({ activations, calls, users, inicio, fim, card, lbl }: any) {
+function TabGeral({ activations, calls, users, inicio, fim, card, lbl, isMes }: any) {
   // Ativações por dia no range
   const days: { label: string; value: number }[] = []
   const callDays: { label: string; value: number }[] = []
@@ -272,6 +281,15 @@ function TabGeral({ activations, calls, users, inicio, fim, card, lbl }: any) {
       return { label: u?.name?.split(' ')[0] ?? '?', value: cnt as number }
     })
 
+  // Metas — closers
+  const closerGoalRows = Object.entries(atMap)
+    .map(([id, cnt]) => {
+      const u = (users as any[]).find((u: any) => u.id === id && u.role === 'Closer')
+      return { nome: u?.name ?? null, ativacoes: cnt as number }
+    })
+    .filter(r => r.nome)
+    .sort((a, b) => b.ativacoes - a.ativacoes)
+
   const sdrCallMap: Record<string, number> = {}
   calls.filter((c: any) => c.status === 'Realizada').forEach((c: any) => {
     const n = c.sdr_nome || 'Sem SDR'
@@ -279,6 +297,19 @@ function TabGeral({ activations, calls, users, inicio, fim, card, lbl }: any) {
   })
   const topSDRs = Object.entries(sdrCallMap).sort((a, b) => b[1] - a[1]).slice(0, 6)
     .map(([label, value]) => ({ label: label.split(' ')[0], value: value as number }))
+
+  // Metas — SDRs
+  const sdrGoalMap: Record<string, { ag: number; re: number }> = {}
+  calls.forEach((c: any) => {
+    const n = c.sdr_nome
+    if (!n) return
+    if (!sdrGoalMap[n]) sdrGoalMap[n] = { ag: 0, re: 0 }
+    sdrGoalMap[n].ag++
+    if (c.status === 'Realizada') sdrGoalMap[n].re++
+  })
+  const sdrGoalRows = Object.entries(sdrGoalMap)
+    .map(([nome, v]) => ({ nome, ...v }))
+    .sort((a, b) => b.re - a.re)
 
   const donutCalls = [
     { label: 'Realizadas', value: realizadas, color: COR.verde },
@@ -319,12 +350,92 @@ function TabGeral({ activations, calls, users, inicio, fim, card, lbl }: any) {
         <Kpi label="Realizadas"       value={realizadas}                   color={COR.verde}   card={card} />
         <Kpi label="Taxa Conversão"   value={`${taxaConv.toFixed(1)}%`}   color={COR.verde}   card={card} />
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: isMes ? 16 : 20 }}>
         <Kpi label="Usuários Ativos"  value={users.filter((u: any) => u.active).length} color={COR.amarelo} card={card} />
         <Kpi label="Faturamento Total" value={BRL(faturamentoTotal)}       color={COR.verde}   card={card} />
         <Kpi label="Ticket Médio"     value={BRL(ticketMedio)}             color={COR.azul}    card={card} />
         <Kpi label="Ativadas p/ Call" value={ativadas}                     color={COR.roxo}    card={card} />
       </div>
+
+      {/* Metas do mês */}
+      {isMes && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+
+          {/* Meta Closers */}
+          <div style={{ ...card, padding: '20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>🎯 Meta Closers</div>
+              <span style={{ fontSize: 12, color: 'var(--text2)' }}>Meta: <strong style={{ color: 'var(--text)' }}>{GOALS.closer.ativacoes_mes}</strong> ativações</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
+              {closerGoalRows.length === 0
+                ? <div style={{ color: 'var(--text2)', fontSize: 13 }}>Sem dados para o mês</div>
+                : closerGoalRows.map((r: any) => {
+                    const pct = Math.min(100, (r.ativacoes / GOALS.closer.ativacoes_mes) * 100)
+                    const cor = metaColor(pct, 1)
+                    return (
+                      <div key={r.nome} style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: '12px 14px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                          <Avatar name={r.nome} size={26} />
+                          <span style={{ fontWeight: 700, fontSize: 13 }}>{r.nome.split(' ')[0]}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 5 }}>
+                          <span style={{ color: 'var(--text2)' }}>Ativações</span>
+                          <span style={{ fontWeight: 800, color: cor }}>{r.ativacoes}/{GOALS.closer.ativacoes_mes}</span>
+                        </div>
+                        <div style={{ height: 7, background: 'var(--bg-card)', borderRadius: 20, overflow: 'hidden' }}>
+                          <div style={{ width: `${pct}%`, height: '100%', background: cor, borderRadius: 20, transition: 'width .4s' }} />
+                        </div>
+                      </div>
+                    )
+                  })
+              }
+            </div>
+          </div>
+
+          {/* Meta SDRs */}
+          <div style={{ ...card, padding: '20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>🎯 Meta SDR</div>
+              <div style={{ display: 'flex', gap: 14, fontSize: 12, color: 'var(--text2)' }}>
+                <span>Ag: <strong style={{ color: 'var(--text)' }}>{GOALS.sdr.reunioes_agendadas_mes}</strong></span>
+                <span>Re: <strong style={{ color: 'var(--text)' }}>{GOALS.sdr.reunioes_realizadas_mes}</strong></span>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
+              {sdrGoalRows.length === 0
+                ? <div style={{ color: 'var(--text2)', fontSize: 13 }}>Sem dados para o mês</div>
+                : sdrGoalRows.map((s: any) => {
+                    const pctAg = Math.min(100, (s.ag / GOALS.sdr.reunioes_agendadas_mes) * 100)
+                    const pctRe = Math.min(100, (s.re / GOALS.sdr.reunioes_realizadas_mes) * 100)
+                    const corAg = metaColor(pctAg, 1)
+                    const corRe = metaColor(pctRe, 1)
+                    return (
+                      <div key={s.nome} style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: '12px 14px' }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10 }}>{s.nome.split(' ')[0]}</div>
+                        {([
+                          { label: 'Agendadas',  val: s.ag, meta: GOALS.sdr.reunioes_agendadas_mes,  cor: corAg, pct: pctAg },
+                          { label: 'Realizadas', val: s.re, meta: GOALS.sdr.reunioes_realizadas_mes, cor: corRe, pct: pctRe },
+                        ] as const).map(({ label, val, meta, cor, pct }) => (
+                          <div key={label} style={{ marginBottom: 6 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
+                              <span style={{ color: 'var(--text2)' }}>{label}</span>
+                              <span style={{ fontWeight: 700, color: cor }}>{val}/{meta}</span>
+                            </div>
+                            <div style={{ height: 6, background: 'var(--bg-card)', borderRadius: 20, overflow: 'hidden' }}>
+                              <div style={{ width: `${pct}%`, height: '100%', background: cor, borderRadius: 20, transition: 'width .4s' }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })
+              }
+            </div>
+          </div>
+
+        </div>
+      )}
 
       {/* Row 1: Ativações por dia + Calls por dia */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
@@ -423,7 +534,7 @@ function TabGeral({ activations, calls, users, inicio, fim, card, lbl }: any) {
 // ══════════════════════════════════════════════════════════════════════════════
 // TAB: ATIVAÇÕES
 // ══════════════════════════════════════════════════════════════════════════════
-function TabAtivacoes({ activations, closers, inicio, fim, card, lbl }: any) {
+function TabAtivacoes({ activations, closers, inicio, fim, card, lbl, isMes }: any) {
   const [selectedCloser, setSelectedCloser] = useState('')
 
   const base = selectedCloser ? activations.filter((a: any) => a.responsible === selectedCloser) : activations
@@ -491,6 +602,38 @@ function TabAtivacoes({ activations, closers, inicio, fim, card, lbl }: any) {
   return (
     <div>
       <EmployeeFilter label="Filtrar por Closer" options={closers} value={selectedCloser} onChange={setSelectedCloser} />
+
+      {/* Meta do mês — Closers */}
+      {isMes && closerRanking.length > 0 && (
+        <div style={{ ...card, padding: '20px', marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>🎯 Meta do mês — Closers</div>
+            <span style={{ fontSize: 12, color: 'var(--text2)' }}>Meta: <strong style={{ color: 'var(--text)' }}>{GOALS.closer.ativacoes_mes}</strong> ativações por closer</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
+            {closerRanking.map((r: any) => {
+              const pct = Math.min(100, (r.ativacoes / GOALS.closer.ativacoes_mes) * 100)
+              const cor = metaColor(pct, 1)
+              return (
+                <div key={r.nome} style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: '12px 14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <Avatar name={r.nome} size={28} />
+                    <span style={{ fontWeight: 700, fontSize: 13 }}>{r.nome.split(' ')[0]}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 5 }}>
+                    <span style={{ color: 'var(--text2)' }}>Ativações</span>
+                    <span style={{ fontWeight: 800, color: cor }}>{r.ativacoes}/{GOALS.closer.ativacoes_mes}</span>
+                  </div>
+                  <div style={{ height: 7, background: 'var(--bg-card)', borderRadius: 20, overflow: 'hidden' }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: cor, borderRadius: 20, transition: 'width .4s' }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 12 }}>
         <Kpi label="Total"           value={base.length}                                                     color={COR.roxo}  card={card} />
         <Kpi label="Com gerente"     value={base.filter((a: any) => a.gerente_id).length}                    color={COR.verde} card={card} />
@@ -512,7 +655,29 @@ function TabAtivacoes({ activations, closers, inicio, fim, card, lbl }: any) {
         </div>
         <div style={{ ...card, padding: 20 }}>
           {lbl('Funil')}
-          {donutFunil.length ? <DonutChart data={donutFunil} size={100} thickness={14} /> : <div style={{ color: 'var(--text2)', fontSize: 13 }}>Sem dados</div>}
+          {donutFunil.length ? (
+            <>
+              <DonutChart data={donutFunil} size={100} thickness={14} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
+                {donutFunil.map(d => {
+                  const total = donutFunil.reduce((s, x) => s + x.value, 0)
+                  const pct   = total > 0 ? Math.round((d.value / total) * 100) : 0
+                  return (
+                    <div key={d.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--text2)' }}>
+                        <span style={{ width: 7, height: 7, borderRadius: '50%', background: d.color, display: 'inline-block', flexShrink: 0 }} />
+                        {d.label}
+                      </span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ color: 'var(--text2)', fontSize: 10 }}>{pct}%</span>
+                        <strong style={{ color: d.color }}>{d.value}</strong>
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          ) : <div style={{ color: 'var(--text2)', fontSize: 13 }}>Sem dados</div>}
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
@@ -565,7 +730,7 @@ function TabAtivacoes({ activations, closers, inicio, fim, card, lbl }: any) {
 // ══════════════════════════════════════════════════════════════════════════════
 // TAB: CALLS / SDR
 // ══════════════════════════════════════════════════════════════════════════════
-function TabCalls({ calls, sdrs, inicio, fim, card, lbl }: any) {
+function TabCalls({ calls, sdrs, inicio, fim, card, lbl, isMes }: any) {
   const [selectedSdr, setSelectedSdr] = useState('')
 
   const sdrNames = [...new Set(calls.map((c: any) => c.sdr_nome).filter(Boolean))] as string[]
@@ -641,6 +806,69 @@ function TabCalls({ calls, sdrs, inicio, fim, card, lbl }: any) {
   return (
     <div>
       <EmployeeFilter label="Filtrar por SDR" options={sdrOptions} value={selectedSdr} onChange={setSelectedSdr} />
+
+      {/* Meta do mês — SDR */}
+      {isMes && (
+        <div style={{ ...card, padding: '20px', marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>🎯 Meta do mês — SDR</div>
+            <div style={{ display: 'flex', gap: 16, fontSize: 12, color: 'var(--text2)' }}>
+              <span>Agendadas: <strong style={{ color: 'var(--text)' }}>{GOALS.sdr.reunioes_agendadas_mes}</strong></span>
+              <span>Realizadas: <strong style={{ color: 'var(--text)' }}>{GOALS.sdr.reunioes_realizadas_mes}</strong></span>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: sdrRows.length > 0 ? 14 : 0 }}>
+            {[
+              { label: 'Agendadas (time)', val: total,     meta: GOALS.sdr.reunioes_agendadas_mes  },
+              { label: 'Realizadas (time)', val: realizadas, meta: GOALS.sdr.reunioes_realizadas_mes },
+            ].map(({ label, val, meta }) => {
+              const pct = Math.min(100, (val / meta) * 100)
+              const cor = metaColor(pct, 1)
+              return (
+                <div key={label}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 5 }}>
+                    <span style={{ color: 'var(--text2)', fontWeight: 600 }}>{label}</span>
+                    <span style={{ fontWeight: 800, color: cor }}>{val} / {meta}</span>
+                  </div>
+                  <div style={{ height: 8, background: 'var(--bg-card2)', borderRadius: 20, overflow: 'hidden' }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: cor, borderRadius: 20, transition: 'width .4s' }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          {sdrRows.length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10 }}>
+              {sdrRows.map((s: any) => {
+                const pctAg = Math.min(100, (s.ag / GOALS.sdr.reunioes_agendadas_mes) * 100)
+                const pctRe = Math.min(100, (s.re / GOALS.sdr.reunioes_realizadas_mes) * 100)
+                const corAg = metaColor(pctAg, 1)
+                const corRe = metaColor(pctRe, 1)
+                return (
+                  <div key={s.nome} style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: '12px 14px' }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10 }}>{s.nome.split(' ')[0]}</div>
+                    {([
+                      { label: 'Agendadas',  val: s.ag, meta: GOALS.sdr.reunioes_agendadas_mes,  cor: corAg, pct: pctAg },
+                      { label: 'Realizadas', val: s.re, meta: GOALS.sdr.reunioes_realizadas_mes, cor: corRe, pct: pctRe },
+                    ] as const).map(({ label, val, meta, cor, pct }) => (
+                      <div key={label} style={{ marginBottom: 6 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
+                          <span style={{ color: 'var(--text2)' }}>{label}</span>
+                          <span style={{ fontWeight: 700, color: cor }}>{val}/{meta}</span>
+                        </div>
+                        <div style={{ height: 6, background: 'var(--bg-card)', borderRadius: 20, overflow: 'hidden' }}>
+                          <div style={{ width: `${pct}%`, height: '100%', background: cor, borderRadius: 20, transition: 'width .4s' }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 12 }}>
         <Kpi label="Total Calls"    value={total}                         color={COR.azul}    card={card} />
         <Kpi label="Realizadas"     value={realizadas}                    color={COR.verde}   card={card} />
@@ -741,7 +969,7 @@ function TabCarteiraGC({ mbClientes, gerentes, card, lbl, BRL }: any) {
   const gerentesNomes = [...new Set((mbClientes as MbCliente[]).map(c => c.gerente))].sort()
   const gerenteOptions = gerentesNomes.map(n => {
     const u = (gerentes as any[]).find((g: any) => g.name === n)
-    return { id: u?.id ?? n, name: n }
+    return { id: u?.id ?? n, name: gerenteNome(n) }
   })
 
   const base: MbCliente[] = selectedGerente
@@ -794,7 +1022,7 @@ function TabCarteiraGC({ mbClientes, gerentes, card, lbl, BRL }: any) {
   const tpvPorGerente = rows
     .filter(r => r.tpvTotal > 0)
     .sort((a, b) => b.tpvTotal - a.tpvTotal)
-    .map(r => ({ label: r.nome.split(' ')[0], value: r.tpvTotal }))
+    .map(r => ({ label: gerenteNome(r.nome), value: Math.round(r.tpvTotal), display: BRL(Math.round(r.tpvTotal)) }))
 
   const pctColor = (p: number) => p >= 80 ? COR.verde : p >= 50 ? COR.amarelo : p >= 20 ? COR.vermelho : '#636366'
 
@@ -809,10 +1037,44 @@ function TabCarteiraGC({ mbClientes, gerentes, card, lbl, BRL }: any) {
         <Kpi label="Prev. fat."  value={BRL(totalPrev)}         color={COR.roxo}    card={card} />
         <Kpi label="% Geral"     value={`${pctGeralTotal.toFixed(1)}%`} color={pctColor(pctGeralTotal)} card={card} />
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 16 }}>
         <Kpi label="≥ 80%"       value={totalV80}               color={COR.verde}   card={card} />
         <Kpi label="Zerados"     value={totalZero}              color='#636366'     card={card} />
         <Kpi label="Ticket Médio" value={BRL(ticketMedioGC)}   color={COR.azul}    card={card} />
+      </div>
+
+      {/* Metas por Tier */}
+      <div style={{ ...card, padding: '20px', marginBottom: 16 }}>
+        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>🎯 Metas por Tier</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+          {([
+            { tier: 'starter',    label: 'Starter',    meta: GOALS.gc.starter    * 100, color: '#07BA1C', minPrev: 0,      maxPrev: 50000  },
+            { tier: 'growth',     label: 'Growth',     meta: GOALS.gc.growth     * 100, color: '#2BB9FF', minPrev: 50000,  maxPrev: 250000 },
+            { tier: 'enterprise', label: 'Enterprise', meta: GOALS.gc.enterprise * 100, color: '#BF5AF2', minPrev: 250000, maxPrev: Infinity },
+          ] as { tier: string; label: string; meta: number; color: string; minPrev: number; maxPrev: number }[]).map(({ tier, label, meta, color, minPrev, maxPrev }) => {
+            const tierCli = (base as MbCliente[]).filter(c => c.previsao_faturamento > minPrev && c.previsao_faturamento <= maxPrev)
+            const tpvT   = tierCli.reduce((s, c) => s + (c.tpv_mes ?? 0), 0)
+            const prevT  = tierCli.reduce((s, c) => s + c.previsao_faturamento, 0)
+            const atingPct  = prevT > 0 ? (tpvT / prevT) * 100 : 0
+            const hitting   = tierCli.filter(c => c.previsao_faturamento > 0 && ((c.tpv_mes ?? 0) / c.previsao_faturamento * 100) >= meta).length
+            const cor = metaColor(Math.min(100, (atingPct / meta) * 100), 1)
+            return (
+              <div key={tier} style={{ background: 'var(--bg-card2)', borderRadius: 12, padding: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, color, textTransform: 'uppercase', letterSpacing: '.05em' }}>{label}</span>
+                  <span style={{ fontSize: 11, color: 'var(--text2)' }}>meta: {meta}%</span>
+                </div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: cor, marginBottom: 4 }}>{atingPct.toFixed(1)}%</div>
+                <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 10 }}>
+                  {hitting}/{tierCli.length} clientes na meta
+                </div>
+                <div style={{ height: 7, background: 'var(--bg-card)', borderRadius: 20, overflow: 'hidden' }}>
+                  <div style={{ width: `${Math.min(100, (atingPct / meta) * 100)}%`, height: '100%', background: cor, borderRadius: 20, transition: 'width .4s' }} />
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 16, marginBottom: 16 }}>
@@ -862,8 +1124,8 @@ function TabCarteiraGC({ mbClientes, gerentes, card, lbl, BRL }: any) {
                   <tr key={r.nome} style={{ borderBottom: '1px solid var(--border)' }}>
                     <td style={{ padding: '12px 14px', fontWeight: 600 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Avatar name={r.nome} size={26} />
-                        {r.nome}
+                        <Avatar name={gerenteNome(r.nome)} size={26} />
+                        {gerenteNome(r.nome)}
                       </div>
                     </td>
                     <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700 }}>{r.total}</td>
@@ -904,7 +1166,7 @@ function TabCarteiraGC({ mbClientes, gerentes, card, lbl, BRL }: any) {
       {tpvPorGerente.length > 0 && (
         <div style={{ ...card, padding: 20 }}>
           {lbl('TPV por Gerente')}
-          <BarChartH data={tpvPorGerente} labelKey="label" valueKey="value" color1={COR.verde} color2="#5EDB7A" />
+          <BarChartH data={tpvPorGerente} labelKey="label" valueKey="value" displayKey="display" color1={COR.verde} color2="#5EDB7A" labelWidth={120} valueWidth={100} />
         </div>
       )}
     </div>

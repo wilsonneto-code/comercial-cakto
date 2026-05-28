@@ -285,6 +285,7 @@ function GCAtivacoesCont({ isAdmin, currentUser }: { isAdmin: boolean; currentUs
             name: capitalize(form.client), email: form.email, phone: form.phone || null,
             team_uuid: responsibleUser?.team_id ?? null, notes: form.notes || null, image_urls: imageUrls,
             faturamento_mensal: form.faturamento_mensal ? parseFloat(form.faturamento_mensal) || null : null,
+            channel: form.channel || null,
           },
           headers: authHeaders,
         })

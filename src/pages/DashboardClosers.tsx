@@ -10,6 +10,7 @@ import { BarChartH } from '@/components/ui/charts/BarChartH'
 import { BarChartV } from '@/components/ui/charts/BarChartV'
 import { DonutChart } from '@/components/ui/charts/DonutChart'
 import { supabase } from '@/lib/supabase/client'
+import { GOALS, metaColor } from '@/lib/goals'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const DATA_INICIO_REGRA = '2026-04-01'
@@ -34,6 +35,14 @@ interface RawActivation {
   gerente_id: string | null
   gc_status: string | null
   welcome_sent: boolean | null
+}
+
+interface RawCall {
+  id: string
+  title: string | null
+  client_email: string | null
+  responsible: string | null
+  motivo_nao_ativacao: string | null
 }
 
 interface RawUser {
@@ -166,6 +175,7 @@ function DashboardClosersContent() {
   const [users,       setUsers]       = useState<RawUser[]>([])
   const [teams,       setTeams]       = useState<RawTeam[]>([])
   const [tpvCache,    setTpvCache]    = useState<RawTpvCache[]>([])
+  const [calls,       setCalls]       = useState<RawCall[]>([])
   const [isLoading,   setIsLoading]   = useState(true)
 
   // ── Load data ────────────────────────────────────────────────────────────────
@@ -177,6 +187,7 @@ function DashboardClosersContent() {
         { data: usrs },
         { data: tms },
         { data: tpv },
+        { data: cls },
       ] = await Promise.all([
         supabase
           .from('activations')
@@ -193,11 +204,18 @@ function DashboardClosersContent() {
           .from('tpv_cache')
           .select('closer_email,tpv_30_dias,tpv_7_dias,bonus_closer,cliente_email,data_fechamento,time_id')
           .gte('data_fechamento', DATA_INICIO_REGRA),
+        supabase
+          .from('calls')
+          .select('id,title,client_email,responsible,motivo_nao_ativacao')
+          .gte('date', inicio)
+          .lte('date', fim)
+          .not('motivo_nao_ativacao', 'is', null),
       ])
       setActivations((acts ?? []) as RawActivation[])
       setUsers((usrs ?? []) as RawUser[])
       setTeams((tms ?? []) as RawTeam[])
       setTpvCache((tpv ?? []) as RawTpvCache[])
+      setCalls((cls ?? []) as RawCall[])
       setIsLoading(false)
     }
     load()
@@ -298,6 +316,11 @@ function DashboardClosersContent() {
       { label: 'Enterprise (>250k)',  value: enterprise, color: '#BF5AF2' },
     ].filter(d => d.value > 0)
   }, [activations])
+
+  // ── Tabela: motivos de não ativação ────────────────────────────────────────
+  const naoAtivados = useMemo(() => {
+    return calls.filter(c => c.motivo_nao_ativacao)
+  }, [calls])
 
   // ── GC Status breakdown ─────────────────────────────────────────────────────
   const gcStatus = useMemo(() => {
@@ -413,6 +436,37 @@ function DashboardClosersContent() {
             valueSize={22}
           />
         </div>
+
+        {/* ── Meta do período ─────────────────────────────────────────── */}
+        {preset === 'mes' && (
+          <div style={{ ...card, marginBottom: 16 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+              🎯 Meta do mês — Closers
+              <span style={{ fontSize: 12, color: 'var(--text2)', fontWeight: 400 }}>Meta: {GOALS.closer.ativacoes_mes} ativações por closer</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
+              {closerRows.map(r => {
+                const pct = Math.min(100, (r.ativacoes / GOALS.closer.ativacoes_mes) * 100)
+                const cor = metaColor(pct, 1)
+                return (
+                  <div key={r.id} style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: '12px 14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Avatar name={r.name} size={26} />
+                        <span style={{ fontWeight: 600, fontSize: 13 }}>{r.name.split(' ')[0]}</span>
+                      </div>
+                      <span style={{ fontWeight: 800, fontSize: 13, color: cor }}>{r.ativacoes}/{GOALS.closer.ativacoes_mes}</span>
+                    </div>
+                    <div style={{ height: 6, background: 'var(--border)', borderRadius: 20, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${pct}%`, background: cor, borderRadius: 20, transition: 'width .4s' }} />
+                    </div>
+                    <div style={{ fontSize: 11, color: cor, fontWeight: 700, marginTop: 5, textAlign: 'right' }}>{pct.toFixed(0)}%</div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* ── Charts row 1: Ativações por dia + Por Canal ─────────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, marginBottom: 16 }}>
@@ -557,6 +611,62 @@ function DashboardClosersContent() {
             </table>
           </div>
         </div>
+
+        {/* ── Motivos de Não Ativação ──────────────────────────────────── */}
+        {naoAtivados.length > 0 && (
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden', marginBottom: 16 }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>Motivos de Não Ativação</div>
+              <span style={{ fontSize: 12, color: 'var(--text2)' }}>
+                {naoAtivados.length} cliente{naoAtivados.length !== 1 ? 's' : ''} no período
+              </span>
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: 'var(--bg-card2)' }}>
+                    {['Cliente', 'Email', 'Closer', 'Motivo'].map(h => (
+                      <th key={h} style={{
+                        padding: '10px 16px', textAlign: 'left',
+                        fontSize: 11, fontWeight: 700, color: 'var(--text2)',
+                        textTransform: 'uppercase', letterSpacing: '.04em',
+                        whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)',
+                      }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {naoAtivados.map((c, i) => {
+                    const closer = users.find(u => u.id === c.responsible)
+                    return (
+                      <tr key={c.id}
+                        style={{ borderBottom: '1px solid var(--border)' }}
+                        onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-card2)')}
+                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                        <td style={{ padding: '12px 16px', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                          {c.title || '—'}
+                        </td>
+                        <td style={{ padding: '12px 16px', color: 'var(--text2)', fontSize: 12 }}>
+                          {c.client_email || '—'}
+                        </td>
+                        <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
+                          {closer ? (
+                            <span style={{ background: '#F59E0B18', color: '#F59E0B', fontWeight: 600, fontSize: 12, padding: '2px 9px', borderRadius: 20 }}>
+                              {closer.name.split(' ')[0]}
+                            </span>
+                          ) : <span style={{ color: 'var(--text2)' }}>—</span>}
+                        </td>
+                        <td style={{ padding: '12px 16px', color: 'var(--text)', lineHeight: 1.5 }}>
+                          {c.motivo_nao_ativacao}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* ── GC Status breakdown ─────────────────────────────────────── */}
         <div>

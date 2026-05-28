@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { Search, Edit, Users, Plus, Lock, Loader2 } from 'lucide-react';
+import { Search, Edit, Users, Plus, Lock, Loader2, Eye } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { useToast } from '@/components/ui/Toast';
 import { Header } from '@/components/Header';
@@ -48,10 +48,10 @@ export default function ResponsaveisPage() {
   return <ResponsaveisContent isAdmin={user.role === 'Admin'} />;
 }
 
-function UserCard({ u, isAdmin, teamName, onEdit, onToggle }: {
+function UserCard({ u, isAdmin, teamName, onEdit, onToggle, onPreview }: {
   u: DbUser; isAdmin: boolean
   teamName: (id: string | null) => string
-  onEdit: () => void; onToggle: () => void
+  onEdit: () => void; onToggle: () => void; onPreview: () => void
 }) {
   const subtitle = u.role === 'Colaborador' ? (u.setor || '—') : teamName(u.team_id)
   return (
@@ -72,12 +72,18 @@ function UserCard({ u, isAdmin, teamName, onEdit, onToggle }: {
         <Badge label={subtitle} color="var(--text2)" />
       </div>
       {isAdmin && (
-        <div style={{ display: 'flex', gap: 8, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-          <Button size="sm" variant="secondary" icon={Edit}
-            onClick={onEdit} style={{ flex: 1, justifyContent: 'center' }}>Editar</Button>
-          <Button size="sm" variant={u.active ? 'destructive' : 'secondary'}
-            onClick={onToggle} style={{ flex: 1, justifyContent: 'center' }}>
-            {u.active ? 'Desativar' : 'Reativar'}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button size="sm" variant="secondary" icon={Edit}
+              onClick={onEdit} style={{ flex: 1, justifyContent: 'center' }}>Editar</Button>
+            <Button size="sm" variant={u.active ? 'destructive' : 'secondary'}
+              onClick={onToggle} style={{ flex: 1, justifyContent: 'center' }}>
+              {u.active ? 'Desativar' : 'Reativar'}
+            </Button>
+          </div>
+          <Button size="sm" variant="secondary" icon={Eye}
+            onClick={onPreview} style={{ justifyContent: 'center', width: '100%', color: '#F59E0B', borderColor: '#F59E0B55' }}>
+            Visualizar como {u.name.split(' ')[0]}
           </Button>
         </div>
       )}
@@ -87,6 +93,7 @@ function UserCard({ u, isAdmin, teamName, onEdit, onToggle }: {
 
 function ResponsaveisContent({ isAdmin }: { isAdmin: boolean }) {
   const toast = useToast();
+  const { startPreview } = useAuth();
   const [tab, setTab] = useState('Colaboradores');
   const [users, setUsers] = useState<DbUser[]>([]);
   const [teams, setTeams] = useState<DbTeam[]>([]);
@@ -245,7 +252,8 @@ function ResponsaveisContent({ isAdmin }: { isAdmin: boolean }) {
                   {filteredCommercial.map(u => (
                     <UserCard key={u.id} u={u} isAdmin={isAdmin} teamName={teamName}
                       onEdit={() => { setForm({ name: u.name, role: u.role, extra_roles: u.extra_roles ?? [], team_id: u.team_id || '', active: u.active, setor: u.setor || '' }); setModalEdit(u); }}
-                      onToggle={() => setModalDeact(u)} />
+                      onToggle={() => setModalDeact(u)}
+                      onPreview={() => startPreview({ id: u.id, name: u.name, email: u.email, role: u.role, extra_roles: u.extra_roles ?? [], team_id: u.team_id, active: u.active })} />
                   ))}
                   {filteredCommercial.length === 0 && (
                     <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: 24, color: 'var(--text2)', fontSize: 14 }}>
@@ -265,7 +273,8 @@ function ResponsaveisContent({ isAdmin }: { isAdmin: boolean }) {
                   {filteredColaboradores.map(u => (
                     <UserCard key={u.id} u={u} isAdmin={isAdmin} teamName={teamName}
                       onEdit={() => { setForm({ name: u.name, role: u.role, extra_roles: u.extra_roles ?? [], team_id: u.team_id || '', active: u.active, setor: u.setor || '' }); setModalEdit(u); }}
-                      onToggle={() => setModalDeact(u)} />
+                      onToggle={() => setModalDeact(u)}
+                      onPreview={() => startPreview({ id: u.id, name: u.name, email: u.email, role: u.role, extra_roles: u.extra_roles ?? [], team_id: u.team_id, active: u.active })} />
                   ))}
                   {filteredColaboradores.length === 0 && (
                     <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: 24, color: 'var(--text2)', fontSize: 14 }}>

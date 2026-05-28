@@ -78,7 +78,8 @@ function DashboardsContent() {
   const [view, setView] = useState<DashView>('grid');
   const { user } = useAuth();
   const isAdmin = hasAnyRole(user, ['Admin']);
-  const isSocio = (user?.extra_roles ?? []).includes('Sócio');
+  const isSocio = hasAnyRole(user, ['Sócio']);
+  const isAdminOrSocio = isAdmin || isSocio;
   const navigate = useNavigate();
   if (view === 'sdr')        return <DashSDRContent  onBack={() => setView('grid')} />;
   if (view === 'gerente')    return <DashGCContent   onBack={() => setView('grid')} />;
@@ -92,7 +93,7 @@ function DashboardsContent() {
 
   // Time 02 visível apenas para admins nos painéis
   const adminTimeCards = [
-    { num: '02', color: '#22C55E', label: 'Tarefas GC', desc: 'Tarefas concluídas por gerente de contas.' },
+    { num: 'tarefas-gc', color: '#22C55E', label: 'Tarefas GC', desc: 'Todas as tarefas dos gerentes de contas: pendentes, vencidas, concluídas e performance por gerente.' },
   ];
 
   // Cards de dashboards principais (Closers, SDR, Gerente)
@@ -159,7 +160,7 @@ function DashboardsContent() {
         </div>
 
         {/* ── Painéis — Admin e Sócio ── */}
-        {(isAdmin || isSocio) && (
+        {isAdminOrSocio && (
           <>
             <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text2)', marginBottom: 12 }}>
               Painéis
@@ -185,8 +186,8 @@ function DashboardsContent() {
                   {!card.disabled && <div style={{ fontSize: 13, fontWeight: 600, color: card.color }}>Abrir dashboard →</div>}
                 </div>
               ))}
-              {adminTimeCards.filter(tc => isAdmin || (isSocio && tc.num === '02')).map(tc => (
-                <div key={tc.num} className="card-hover" onClick={() => navigate(`/dashboard/time/${tc.num}`)} style={{
+              {adminTimeCards.filter(tc => isAdmin || isSocio).map(tc => (
+                <div key={tc.num} className="card-hover" onClick={() => navigate(tc.num === 'tarefas-gc' ? '/dashboard/tarefas-gc' : `/dashboard/time/${tc.num}`)} style={{
                   background: 'var(--bg-card)', border: '1px solid color-mix(in srgb, #EF4444 30%, var(--border))', borderRadius: 16, padding: 24,
                   cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 16,
                 }}>

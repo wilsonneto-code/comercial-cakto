@@ -8,7 +8,7 @@ const CORS = {
 
 const GERENTES: Record<number, string> = {
   4204072: 'Rafael Mendes',
-  5843493: 'Isaac',
+  5267370: 'Carlos Eduardo',
   5726885: 'Gabriel Bairros',
 }
 
@@ -479,6 +479,87 @@ serve(async (req) => {
     }
   }
 
+  // ── Modo: TPV por ativação — janela customizada (ativação_date → +30 dias) ─
+  // body = { tpv_por_ativacao: true, activacoes: [{id, email, start, end}] }
+  // Retorna { tpv: Record<activacao_id, number> }
+  if (body.tpv_por_ativacao && Array.isArray(body.activacoes) && body.activacoes.length > 0) {
+    try {
+      const acts = (body.activacoes as { id: string; email: string; start: string; end: string }[])
+        .filter(a => a.email && a.id)
+
+      if (!acts.length) return json({ tpv: {} })
+
+      // Constrói VALUES com types explícitos para o PostgreSQL
+      const values = acts
+        .map(a =>
+          `('${a.id.replace(/'/g, "''")}'::text, '${a.email.toLowerCase().replace(/'/g, "''")}'::text, '${a.start}'::date, '${a.end}'::date)`
+        )
+        .join(',\n        ')
+
+      // DB #3 (Split): payment_payment com liquidAmount + paidAt/createdAt
+      const sql3 = `
+        WITH ranges(act_id, email, start_date, end_date) AS (
+          VALUES ${values}
+        )
+        SELECT r.act_id,
+          COALESCE(SUM(p."liquidAmount") FILTER (
+            WHERE p."status" = 'paid'
+              AND COALESCE(p."paidAt", p."createdAt") >= r.start_date::timestamp
+              AND COALESCE(p."paidAt", p."createdAt") < r.end_date::timestamp + INTERVAL '1 day'
+          ), 0) AS tpv
+        FROM ranges r
+        JOIN "public"."user_user" u ON LOWER(u."email") = r.email
+        LEFT JOIN "public"."payment_payment" p ON p."user_id" = u."id"
+        GROUP BY r.act_id
+      `
+
+      // DB #4 (Cakto): gateway_split + gateway_order
+      const sql4 = `
+        WITH ranges(act_id, email, start_date, end_date) AS (
+          VALUES ${values}
+        )
+        SELECT r.act_id,
+          COALESCE(SUM(gs."totalAmount") FILTER (
+            WHERE go."status" = 'paid'
+              AND gs."createdAt" >= r.start_date::timestamp
+              AND gs."createdAt" < r.end_date::timestamp + INTERVAL '1 day'
+          ), 0) AS tpv
+        FROM ranges r
+        JOIN "public"."user_user" u ON LOWER(u."email") = r.email
+        LEFT JOIN "public"."gateway_split" gs ON gs."user_id" = u."id"
+        LEFT JOIN "public"."gateway_order" go ON go."id" = gs."order_id"
+        GROUP BY r.act_id
+      `
+
+      const fetchDB4 = (sql: string) =>
+        fetch(`${MB_URL}/api/dataset`, {
+          method: 'POST',
+          headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ database: 4, type: 'native', native: { query: sql } }),
+        }).then(r => r.json()).catch(() => ({ data: { rows: [] } }))
+
+      const [res3, res4] = await Promise.all([
+        runSQL(MB_URL, MB_KEY, sql3).catch(() => ({ cols: [], rows: [] })),
+        fetchDB4(sql4),
+      ])
+
+      const tpv: Record<string, number> = {}
+      // DB #3
+      res3.rows.forEach((r: any[]) => { if (r[0]) tpv[r[0]] = Number(r[1] ?? 0) })
+      // DB #4 — mescla tomando o maior valor
+      ;(res4?.data?.rows ?? []).forEach((r: any[]) => {
+        if (!r[0]) return
+        const v4 = Number(r[1] ?? 0)
+        if (!(r[0] in tpv) || v4 > tpv[r[0]]) tpv[r[0]] = v4
+      })
+
+      return json({ tpv })
+    } catch (err) {
+      console.error('[mb-search tpv_por_ativacao] Erro:', err)
+      return json({ tpv: {} })
+    }
+  }
+
   // ── Modo padrão: carteiras por account_manager_id ──────────────────────
   const amIds = Object.keys(GERENTES).join(',')
   let allRows: any[] = []
@@ -521,7 +602,7 @@ serve(async (req) => {
     offset += PAGE
   }
 
-  // Complementa com Cakto #4 (gateway_split) — em paralelo, nunca quebra a resposta principal
+  // Complementa com Cakto #4 (gateway_split) — bateladas em paralelo, nunca quebra a resposta principal
   try {
     const allEmails = allRows.map(r => r[2]).filter(Boolean)
     if (allEmails.length > 0) {
@@ -529,8 +610,13 @@ serve(async (req) => {
       const caktoMap: Record<string, number> = {}
       const caktoTotalMap: Record<string, number> = {}
 
+      // Monta todas as bateladas e dispara em paralelo
+      const batches: string[][] = []
       for (let i = 0; i < allEmails.length; i += BATCH) {
-        const batch    = allEmails.slice(i, i + BATCH)
+        batches.push(allEmails.slice(i, i + BATCH))
+      }
+
+      const batchResults = await Promise.all(batches.map(batch => {
         const emailList = batch.map((e: string) => `'${e.replace(/'/g, "''")}'`).join(',')
         const sqlCakto4 = `
           SELECT
@@ -546,12 +632,14 @@ serve(async (req) => {
           WHERE LOWER(u."email") IN (${emailList.toLowerCase()})
           GROUP BY u."email"
         `
-        const res = await fetch(`${MB_URL}/api/dataset`, {
+        return fetch(`${MB_URL}/api/dataset`, {
           method: 'POST',
           headers: { 'x-api-key': MB_KEY, 'Content-Type': 'application/json' },
           body: JSON.stringify({ database: 4, type: 'native', native: { query: sqlCakto4 } }),
         }).then(r => r.json()).catch(() => ({}))
+      }))
 
+      for (const res of batchResults) {
         ;(res?.data?.rows ?? []).forEach((r: any[]) => {
           if (r[0]) caktoMap[r[0].toLowerCase()] = Number(r[1] ?? 0)
           if (r[0]) caktoTotalMap[r[0].toLowerCase()] = Number(r[2] ?? 0)

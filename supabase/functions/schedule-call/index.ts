@@ -38,7 +38,7 @@ async function getAccessToken(refreshToken?: string): Promise<string> {
   return json.access_token
 }
 
-async function getGCTokens(gerenteEmail: string): Promise<{ refreshToken: string | null; calendarId: string }> {
+async function getGCTokens(email: string): Promise<{ refreshToken: string | null; calendarId: string }> {
   try {
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
@@ -47,7 +47,7 @@ async function getGCTokens(gerenteEmail: string): Promise<{ refreshToken: string
     const { data } = await supabase
       .from('users')
       .select('google_refresh_token, google_calendar_id')
-      .eq('email', gerenteEmail)
+      .eq('email', email)
       .maybeSingle()
     return {
       refreshToken: data?.google_refresh_token ?? null,
@@ -65,27 +65,59 @@ function closerColorId(name: string): string {
   return String((hash % 11) + 1)
 }
 
+// Cria evento em um calendário sem gerar nova conferência (cópia)
+async function createCopyEvent(
+  calendarId: string,
+  accessToken: string,
+  event: Record<string, unknown>,
+  meetLink: string | null,
+) {
+  const copy = {
+    ...event,
+    conferenceData: undefined,
+    description: [
+      event.description,
+      meetLink ? `\nLink do Meet: ${meetLink}` : '',
+    ].filter(Boolean).join('\n'),
+  }
+  const res = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+    { method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(copy) }
+  )
+  if (!res.ok) console.warn('[schedule-call] Falha ao criar cópia no calendário SDR:', await res.text())
+  else console.log('[schedule-call] Cópia criada no calendário SDR:', calendarId)
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
 
   try {
-    const body        = await req.json()
-    const action        = body.action ?? 'create'
-    const closerEmail   = body.closerEmail ?? ''
-    // Tenta usar o token pessoal do GC, cai no token compartilhado se não tiver
-    const gcTokens      = closerEmail ? await getGCTokens(closerEmail) : { refreshToken: null, calendarId: 'primary' }
-    // Se não há token pessoal, retorna aviso sem usar o token compartilhado (pode estar desatualizado)
-    if (!gcTokens.refreshToken) {
-      console.warn('[schedule-call] Sem token pessoal para:', closerEmail, '— Google Calendar ignorado')
+    const body         = await req.json()
+    const action       = body.action ?? 'create'
+    const closerEmail  = body.closerEmail ?? ''
+    const sdrEmail     = body.sdrEmail ?? ''
+
+    const json   = (s: unknown) => new Response(JSON.stringify(s), { headers: { ...CORS, 'Content-Type': 'application/json' } })
+    const err500 = (msg: string) => new Response(JSON.stringify({ error: msg }), { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } })
+
+    // Busca tokens: closer primeiro, SDR como fallback
+    const closerTokens = closerEmail ? await getGCTokens(closerEmail) : { refreshToken: null, calendarId: 'primary' }
+    const sdrTokens    = sdrEmail && sdrEmail !== closerEmail ? await getGCTokens(sdrEmail) : { refreshToken: null, calendarId: 'primary' }
+
+    // Se nenhum tem token, pula
+    if (!closerTokens.refreshToken && !sdrTokens.refreshToken) {
+      console.warn('[schedule-call] Sem token para closer nem SDR — Google Calendar ignorado')
       return json({ eventId: null, meetLink: null, skipped: true })
     }
-    const calendarId    = gcTokens.calendarId || 'primary'
-    console.log('[schedule-call] closerEmail:', closerEmail, '| calendarId:', calendarId)
-    const accessToken   = await getAccessToken(gcTokens.refreshToken)
-    const calBase     = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`
-    const authHdr     = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }
-    const json        = (s: unknown) => new Response(JSON.stringify(s), { headers: { ...CORS, 'Content-Type': 'application/json' } })
-    const err500      = (msg: string) => new Response(JSON.stringify({ error: msg }), { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } })
+
+    // Usa o token do closer como principal; se não tiver, usa o do SDR
+    const primaryTokens  = closerTokens.refreshToken ? closerTokens : sdrTokens
+    const calendarId     = primaryTokens.calendarId || 'primary'
+    const accessToken    = await getAccessToken(primaryTokens.refreshToken!)
+    const calBase        = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`
+    const authHdr        = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }
+
+    console.log('[schedule-call] principal:', closerTokens.refreshToken ? closerEmail : sdrEmail, '| calendarId:', calendarId)
 
     // ── DELETE ────────────────────────────────────────────────────────────────
     if (action === 'delete') {
@@ -101,7 +133,6 @@ serve(async (req) => {
     const tz      = '-03:00'
     const timeStr = time || '09:00'
 
-    // Hora de término: usa end_time do payload ou +1h como fallback
     let endStr: string
     if (end_time && end_time !== timeStr) {
       endStr = end_time
@@ -116,7 +147,7 @@ serve(async (req) => {
       notes ? `\n${notes}` : '',
     ].filter(Boolean).join('\n')
 
-    // Convidados: admin + GC (se diferente do admin) + cliente
+    // Convidados: admin + closer (se diferente do admin) + cliente
     const attendees: { email: string }[] = [{ email: ADMIN_EMAIL }]
     if (closerEmail && closerEmail !== ADMIN_EMAIL) attendees.push({ email: closerEmail })
     if (clientEmail) attendees.push({ email: clientEmail })
@@ -160,7 +191,18 @@ serve(async (req) => {
     }
     const created  = await calRes.json()
     const meetLink = created.conferenceData?.entryPoints?.find((e: any) => e.entryPointType === 'video')?.uri ?? null
-    return json({ eventId: created.id, htmlLink: created.htmlLink, meetLink, _debug: { calendarId, closerEmail } })
+
+    // Cria cópia no calendário do SDR se ele tiver token e for diferente do principal
+    if (sdrTokens.refreshToken && sdrTokens !== primaryTokens) {
+      try {
+        const sdrAccessToken = await getAccessToken(sdrTokens.refreshToken)
+        await createCopyEvent(sdrTokens.calendarId || 'primary', sdrAccessToken, event, meetLink)
+      } catch (e) {
+        console.warn('[schedule-call] Falha ao criar cópia SDR:', String(e))
+      }
+    }
+
+    return json({ eventId: created.id, htmlLink: created.htmlLink, meetLink })
 
   } catch (e) {
     console.error('[schedule-call] erro:', e)

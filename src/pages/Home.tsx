@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { supabase } from '@/lib/supabase/client'
+import { GOALS, metaColor } from '@/lib/goals'
 
 type AuditLog   = { id: string; user_name: string; action: string; module: string; created_at: string }
 type WebhookLog = { id: string; ativacao_id: string | null; status: string; tentativas: number; erro: string | null; created_at: string }
@@ -50,15 +51,25 @@ export default function Home() {
   const [webhookLogs, setWebhookLogs] = useState<WebhookLog[]>([])
 
   // Closer
-  const [closerCalls, setCloserCalls]   = useState<DailyCall[]>([])
-  const [activations,  setActivations]  = useState<Activation[]>([])
+  const [closerCalls,      setCloserCalls]      = useState<DailyCall[]>([])
+  const [activations,      setActivations]      = useState<Activation[]>([])
+  const [closerMonthCount, setCloserMonthCount] = useState(0)
 
   // SDR
-  const [sdrCalls,  setSdrCalls]  = useState<SdrCall[]>([])
+  const [sdrCalls,          setSdrCalls]          = useState<SdrCall[]>([])
+  const [sdrMonthCalls,     setSdrMonthCalls]     = useState<SdrCall[]>([])
 
   // GC
   const [gcClients, setGcClients] = useState<GcClient[]>([])
   const [gcNotas,   setGcNotas]   = useState<CarteiraNota[]>([])
+
+  // Sócio
+  type GcTaskSummary = { id: string; client_name: string; title: string | null; tipo: string; due_date: string; gc_tier: string | null; gerente_id: string; status: string }
+  type CallSummary   = { id: string; title: string; date: string; time: string; status: string; responsible: string; sdr_nome: string | null }
+  type UserSummary   = { id: string; name: string; role: string }
+  const [socioGcTasks,  setSocioGcTasks]  = useState<GcTaskSummary[]>([])
+  const [socioCalls,    setSocioCalls]    = useState<CallSummary[]>([])
+  const [socioUsers,    setSocioUsers]    = useState<UserSummary[]>([])
 
   useEffect(() => {
     if (loading || !user) return
@@ -80,20 +91,44 @@ export default function Home() {
     }
 
     if (role === 'Closer') {
+      const mesInicio = todayStr.slice(0, 7) + '-01'
       Promise.all([
         supabase.from('calls').select('id,title,date,time,status,client_email,notes,meet_link')
           .eq('date', todayStr).eq('responsible', user.id).order('time'),
         supabase.from('activations').select('id,client,email,phone'),
-      ]).then(([{ data: calls }, { data: acts }]) => {
+        supabase.from('activations').select('id', { count: 'exact', head: true })
+          .eq('responsible', user.id).gte('date', mesInicio).lte('date', todayStr),
+      ]).then(([{ data: calls }, { data: acts }, { count: mc }]) => {
         if (calls) setCloserCalls(calls as DailyCall[])
         if (acts)  setActivations(acts as Activation[])
+        setCloserMonthCount(mc ?? 0)
       })
     }
 
     if (role === 'SDR') {
-      supabase.from('calls').select('id,status,date,sdr_nome,ativado')
-        .eq('date', todayStr)
-        .then(({ data }) => { if (data) setSdrCalls(data as SdrCall[]) })
+      const mesInicio = todayStr.slice(0, 7) + '-01'
+      Promise.all([
+        supabase.from('calls').select('id,status,date,sdr_nome,ativado').eq('date', todayStr),
+        supabase.from('calls').select('id,status,date,sdr_nome,ativado')
+          .gte('date', mesInicio).lte('date', todayStr),
+      ]).then(([{ data: today }, { data: month }]) => {
+        if (today) setSdrCalls(today as SdrCall[])
+        if (month) setSdrMonthCalls(month as SdrCall[])
+      })
+    }
+
+    if (role === 'Sócio') {
+      Promise.all([
+        supabase.from('gc_tasks').select('id,client_name,title,tipo,due_date,gc_tier,gerente_id,status')
+          .eq('status', 'pendente').lte('due_date', todayStr).order('due_date').limit(50),
+        supabase.from('calls').select('id,title,date,time,status,responsible,sdr_nome')
+          .eq('date', todayStr).order('time'),
+        supabase.from('users').select('id,name,role').in('role', ['Closer', 'SDR', 'Gerente de Contas']),
+      ]).then(([{ data: tasks }, { data: calls }, { data: users }]) => {
+        if (tasks) setSocioGcTasks(tasks as GcTaskSummary[])
+        if (calls) setSocioCalls(calls as CallSummary[])
+        if (users) setSocioUsers(users as UserSummary[])
+      })
     }
 
     if (role === 'Gerente de Contas') {
@@ -121,6 +156,7 @@ export default function Home() {
   const isCloser = user.role === 'Closer'
   const isSdr    = user.role === 'SDR'
   const isGC     = user.role === 'Gerente de Contas'
+  const isSocio  = user.role === 'Sócio'
   const firstName = user.name?.split(' ')[0] || 'Usuário'
   const modules = [
     ...MODULES,
@@ -128,14 +164,24 @@ export default function Home() {
   ]
 
   // SDR: filtrar pelo próprio nome
-  const myCallsToday = isSdr ? sdrCalls.filter(c => c.sdr_nome === user.name) : []
-  const SDR_META = 10
+  const myCallsToday  = isSdr ? sdrCalls.filter(c => c.sdr_nome === user.name) : []
+  const myCallsMonth  = isSdr ? sdrMonthCalls.filter(c => c.sdr_nome === user.name) : []
+  const SDR_META = 10 // meta diária legacy
   const sdrAgendadas  = myCallsToday.length
   const sdrRealizadas = myCallsToday.filter(c => c.status === 'Realizada').length
   const sdrNoShow     = myCallsToday.filter(c => c.status === 'No-show').length
   const sdrCanceladas = myCallsToday.filter(c => c.status === 'Cancelada').length
   const sdrAtivadas   = myCallsToday.filter(c => c.ativado).length
   const pctMeta       = Math.min(100, (sdrAgendadas / SDR_META) * 100)
+
+  // Metas mensais SDR
+  const sdrMesAgendadas  = myCallsMonth.length
+  const sdrMesRealizadas = myCallsMonth.filter(c => c.status === 'Realizada').length
+  const pctMesAgendadas  = Math.min(100, (sdrMesAgendadas  / GOALS.sdr.reunioes_agendadas_mes)  * 100)
+  const pctMesRealizadas = Math.min(100, (sdrMesRealizadas / GOALS.sdr.reunioes_realizadas_mes) * 100)
+
+  // Metas mensais Closer
+  const pctCloserMes = Math.min(100, (closerMonthCount / GOALS.closer.ativacoes_mes) * 100)
 
   // GC: clientes para contatar hoje
   const notaMap = Object.fromEntries(gcNotas.map(n => [n.email, n]))
@@ -182,6 +228,23 @@ export default function Home() {
                 color: closerCalls.length === 0 ? 'var(--text2)' : 'var(--action)', border: '1px solid var(--border)' }}>
                 {closerCalls.length} call{closerCalls.length !== 1 ? 's' : ''}
               </span>
+            </div>
+
+            {/* Meta mensal Closer */}
+            <div style={{ ...card, padding: '18px 22px', marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <div>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text2)' }}>Meta do mês · Ativações</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                  <span style={{ fontSize: 24, fontWeight: 900, color: metaColor(pctCloserMes, 1) }}>{closerMonthCount}</span>
+                  <span style={{ fontSize: 14, color: 'var(--text2)' }}>/ {GOALS.closer.ativacoes_mes}</span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: metaColor(pctCloserMes, 1), marginLeft: 8 }}>{pctCloserMes.toFixed(0)}%</span>
+                </div>
+              </div>
+              <div style={{ height: 10, background: 'var(--bg-card2)', borderRadius: 20, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${pctCloserMes}%`, background: metaColor(pctCloserMes, 1), borderRadius: 20, transition: 'width .4s' }} />
+              </div>
             </div>
 
             {closerCalls.length === 0 ? (
@@ -246,6 +309,28 @@ export default function Home() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
               <Target size={18} color="var(--purple)" />
               <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>Sua meta de hoje</h2>
+            </div>
+
+            {/* Metas mensais SDR */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+              {[
+                { label: 'Agendadas no mês',  atual: sdrMesAgendadas,  meta: GOALS.sdr.reunioes_agendadas_mes,  pct: pctMesAgendadas  },
+                { label: 'Realizadas no mês', atual: sdrMesRealizadas, meta: GOALS.sdr.reunioes_realizadas_mes, pct: pctMesRealizadas },
+              ].map(m => (
+                <div key={m.label} style={{ ...card, padding: '18px 20px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text2)' }}>{m.label}</span>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                      <span style={{ fontSize: 22, fontWeight: 900, color: metaColor(m.pct, 1) }}>{m.atual}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text2)' }}>/ {m.meta}</span>
+                      <span style={{ fontSize: 13, fontWeight: 800, color: metaColor(m.pct, 1), marginLeft: 6 }}>{m.pct.toFixed(0)}%</span>
+                    </div>
+                  </div>
+                  <div style={{ height: 8, background: 'var(--bg-card2)', borderRadius: 20, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${m.pct}%`, background: metaColor(m.pct, 1), borderRadius: 20, transition: 'width .4s' }} />
+                  </div>
+                </div>
+              ))}
             </div>
 
             {/* Progresso da meta */}
@@ -452,6 +537,160 @@ export default function Home() {
             </div>
           </div>
         )}
+        {/* ═══ PAINEL SÓCIO ═══════════════════════════════════════════════ */}
+        {isSocio && (() => {
+          const today2 = todayStr
+          const TIER_COLOR: Record<string, string> = { starter: '#07BA1C', growth: '#2BB9FF', enterprise: '#BF5AF2' }
+          const TASK_LABEL: Record<string, string> = {
+            alterar_taxas: 'Alteração de Taxa', d2_boas_vindas: 'Boas Vindas',
+            adicionar_carteira: 'Adicionar na Carteira', d7_incentivo: 'Followup Ativação',
+            d15_manual: 'Acompanhamento Manual', d30_ciclo: 'Resultado do Faturamento',
+            acompanhamento_quinzenal: 'Acompanhamento Quinzenal', acompanhamento_semanal: 'Acompanhamento Semanal',
+          }
+          const card: React.CSSProperties = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }
+
+          const gcOverdue  = socioGcTasks.filter(t => t.due_date < today2)
+          const gcToday    = socioGcTasks.filter(t => t.due_date === today2)
+
+          const closers = socioUsers.filter(u => u.role === 'Closer')
+          const sdrs    = socioUsers.filter(u => u.role === 'SDR')
+          const gcs     = socioUsers.filter(u => u.role === 'Gerente de Contas')
+
+          const callsAgendadas  = socioCalls.filter(c => c.status === 'Agendada')
+          const callsRealizadas = socioCalls.filter(c => c.status === 'Realizada')
+          const callsCanceladas = socioCalls.filter(c => c.status === 'Cancelada')
+          const callsNoShow     = socioCalls.filter(c => c.status === 'No-show')
+
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+
+              {/* ── Tarefas GC ── */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                  <CheckCircle size={18} color="#22C55E" />
+                  <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>Tarefas GC</h2>
+                  {socioGcTasks.length > 0 && <Badge label={`${socioGcTasks.length} pendente${socioGcTasks.length > 1 ? 's' : ''}`} color="var(--orange)" />}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 16 }}>
+                  <div style={card}>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: gcOverdue.length > 0 ? 'var(--red)' : 'var(--text2)' }}>{gcOverdue.length}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>Vencidas</div>
+                  </div>
+                  <div style={card}>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: gcToday.length > 0 ? 'var(--orange)' : 'var(--text2)' }}>{gcToday.length}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>Vencem hoje</div>
+                  </div>
+                  <div style={card}>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--text2)' }}>{gcs.length}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>Gerentes ativos</div>
+                  </div>
+                </div>
+                {socioGcTasks.length > 0 && (
+                  <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
+                    {socioGcTasks.slice(0, 8).map(t => {
+                      const gc = socioUsers.find(u => u.id === t.gerente_id)
+                      const isOverdue = t.due_date < today2
+                      const tierColor = t.gc_tier ? TIER_COLOR[t.gc_tier] : 'var(--text2)'
+                      return (
+                        <div key={t.id} style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <span style={{ fontWeight: 700, fontSize: 13, color: t.tipo === 'alterar_taxas' ? 'var(--red)' : 'var(--text)' }}>{t.title ?? TASK_LABEL[t.tipo] ?? t.tipo}</span>
+                              {t.gc_tier && <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 10, background: `${tierColor}22`, color: tierColor, textTransform: 'capitalize' }}>{t.gc_tier}</span>}
+                              {isOverdue && <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 10, background: '#ff3b3022', color: 'var(--red)' }}>Vencida</span>}
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>
+                              {t.client_name}
+                              {gc && <span style={{ marginLeft: 8, fontWeight: 600, color: 'var(--action)' }}>· {gc.name}</span>}
+                            </div>
+                          </div>
+                          <div style={{ fontSize: 11, color: isOverdue ? 'var(--red)' : 'var(--orange)', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                            {new Date(t.due_date + 'T12:00:00').toLocaleDateString('pt-BR')}
+                          </div>
+                        </div>
+                      )
+                    })}
+                    {socioGcTasks.length > 8 && (
+                      <div style={{ padding: '10px 16px', textAlign: 'center', fontSize: 12, color: 'var(--action)', fontWeight: 600 }}>
+                        +{socioGcTasks.length - 8} tarefas — <button onClick={() => navigate('/dashboard/tarefas-gc')} style={{ color: 'var(--action)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit', fontSize: 12 }}>ver todas</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {socioGcTasks.length === 0 && <div style={{ ...card, color: 'var(--text2)', textAlign: 'center', fontSize: 14 }}>✓ Nenhuma tarefa vencida ou para hoje</div>}
+              </div>
+
+              {/* ── Calls de hoje ── */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                  <Phone size={18} color="var(--action)" />
+                  <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>Calls de Hoje</h2>
+                  <span style={{ fontSize: 13, color: 'var(--text2)' }}>{new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 16 }}>
+                  {[
+                    { label: 'Agendadas',  value: callsAgendadas.length,  color: 'var(--action)' },
+                    { label: 'Realizadas', value: callsRealizadas.length, color: 'var(--green)'  },
+                    { label: 'No-show',    value: callsNoShow.length,     color: 'var(--orange)' },
+                    { label: 'Canceladas', value: callsCanceladas.length, color: 'var(--red)'    },
+                  ].map(k => (
+                    <div key={k.label} style={{ ...card, textAlign: 'center' }}>
+                      <div style={{ fontSize: 28, fontWeight: 800, color: k.color }}>{k.value}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>{k.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Por Closer */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
+                    <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Target size={14} color="var(--purple)" /> Calls por Closer
+                    </div>
+                    {closers.map(c => {
+                      const calls = socioCalls.filter(ca => ca.responsible === c.id)
+                      const realizadas = calls.filter(ca => ca.status === 'Realizada').length
+                      const pct = calls.length > 0 ? Math.round(realizadas / calls.length * 100) : 0
+                      return (
+                        <div key={c.id} style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <Avatar name={c.name} size={28} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
+                            <div style={{ fontSize: 11, color: 'var(--text2)' }}>{calls.length} calls · {realizadas} realizadas</div>
+                          </div>
+                          <span style={{ fontWeight: 800, fontSize: 13, color: pct >= 70 ? 'var(--green)' : pct >= 40 ? 'var(--orange)' : 'var(--red)' }}>{pct}%</span>
+                        </div>
+                      )
+                    })}
+                    {closers.length === 0 && <div style={{ padding: 16, color: 'var(--text2)', fontSize: 13 }}>Nenhum closer</div>}
+                  </div>
+
+                  {/* Por SDR */}
+                  <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
+                    <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <MessageSquare size={14} color="var(--cyan)" /> Calls agendadas por SDR
+                    </div>
+                    {sdrs.map(s => {
+                      const agendadas = socioCalls.filter(ca => ca.sdr_nome === s.name).length
+                      return (
+                        <div key={s.id} style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <Avatar name={s.name} size={28} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 600, fontSize: 13 }}>{s.name}</div>
+                            <div style={{ fontSize: 11, color: 'var(--text2)' }}>{agendadas} call{agendadas !== 1 ? 's' : ''} agendada{agendadas !== 1 ? 's' : ''} hoje</div>
+                          </div>
+                          <span style={{ fontWeight: 800, fontSize: 18, color: agendadas > 0 ? 'var(--cyan)' : 'var(--text2)' }}>{agendadas}</span>
+                        </div>
+                      )
+                    })}
+                    {sdrs.length === 0 && <div style={{ padding: 16, color: 'var(--text2)', fontSize: 13 }}>Nenhum SDR</div>}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
+
       </div>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </>

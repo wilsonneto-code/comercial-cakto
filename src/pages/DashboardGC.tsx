@@ -9,6 +9,7 @@ import { BarChartH } from '@/components/ui/charts/BarChartH'
 import { LineAreaChart } from '@/components/ui/charts/LineAreaChart'
 import { TrendingUp, Users, DollarSign, AlertTriangle, CheckCircle, MessageSquare, RefreshCw, ChevronLeft } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { GOALS, metaColor } from '@/lib/goals'
 
 interface Cliente {
   gerente: string; nome: string; email: string; telefone: string
@@ -26,10 +27,15 @@ const COR  = { verde: '#34C759', amarelo: '#FF9F0A', vermelho: '#FF3B30', azul: 
 
 // Mapeamento nome do gerente → account_manager_id no Metabase
 const GERENTE_AM_ID: Record<string, number> = {
-  'Rafael Mendes':  4204072,
-  'Isaac':          5843493,
-  'Gabriel Bairros':5726885,
+  'Rafael Mendes':   4204072,
+  'Isaac':           5267370,
+  'Carlos Eduardo':  5267370, // alias de Isaac
+  'Gabriel Bairros': 5726885,
 }
+
+// Alias de nomes (Metabase → exibição)
+const GERENTE_ALIAS: Record<string, string> = { 'Isaac': 'Carlos Eduardo' }
+const gerenteNome = (nome: string) => GERENTE_ALIAS[nome] ?? nome
 
 const pctColor = (p: number | null) =>
   p === null ? 'var(--text2)' : p >= 80 ? COR.verde : p >= 50 ? COR.amarelo : COR.vermelho
@@ -191,7 +197,7 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               {onBack && <Button variant="ghost" icon={ChevronLeft} onClick={onBack}>Voltar</Button>}
               <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>
-                {gcNome ? `Dashboard — ${gcNome}` : 'Dashboard Gerente de Contas'}
+                {gcNome ? `Dashboard — ${gerenteNome(gcNome)}` : 'Dashboard Gerente de Contas'}
               </h1>
             </div>
             <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text2)' }}>
@@ -233,6 +239,46 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
               <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>{sub}</div>
             </div>
           ))}
+        </div>
+
+        {/* Meta por Tier */}
+        <div style={{ ...card, padding: '20px', marginBottom: 16 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>🎯 Metas por Tier</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+            {([
+              { tier: 'starter',    label: 'Starter',    meta: GOALS.gc.starter    * 100, color: '#07BA1C', maxPrev: 50000 },
+              { tier: 'growth',     label: 'Growth',     meta: GOALS.gc.growth     * 100, color: '#2BB9FF', minPrev: 50000,  maxPrev: 250000 },
+              { tier: 'enterprise', label: 'Enterprise', meta: GOALS.gc.enterprise * 100, color: '#BF5AF2', minPrev: 250000 },
+            ] as { tier: string; label: string; meta: number; color: string; minPrev?: number; maxPrev?: number }[]).map(({ tier, label, meta, color, minPrev, maxPrev }) => {
+              const tierClients = base.filter(c => {
+                const p = c.previsao_faturamento
+                if (!p) return false
+                if (minPrev !== undefined && p <= minPrev) return false
+                if (maxPrev !== undefined && p > maxPrev) return false
+                return true
+              })
+              const tpvT  = tierClients.reduce((s, c) => s + (c.tpv_mes ?? 0), 0)
+              const prevT = tierClients.reduce((s, c) => s + c.previsao_faturamento, 0)
+              const atingPct = prevT > 0 ? (tpvT / prevT) * 100 : 0
+              const hitting  = tierClients.filter(c => getPct(c) !== null && (getPct(c) ?? 0) >= meta).length
+              const cor = metaColor(Math.min(100, (atingPct / meta) * 100), 1)
+              return (
+                <div key={tier} style={{ background: 'var(--bg-card2)', borderRadius: 12, padding: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, color, textTransform: 'uppercase', letterSpacing: '.05em' }}>{label}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text2)' }}>meta: {meta}%</span>
+                  </div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: cor, marginBottom: 4 }}>{atingPct.toFixed(1)}%</div>
+                  <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 10 }}>
+                    {hitting}/{tierClients.length} clientes na meta · {tierClients.length} total
+                  </div>
+                  <div style={{ height: 7, background: 'var(--bg-card)', borderRadius: 20, overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.min(100, (atingPct / meta) * 100)}%`, height: '100%', background: cor, borderRadius: 20, transition: 'width .4s' }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </div>
 
         {/* Gráfico: faturamento diário da carteira */}

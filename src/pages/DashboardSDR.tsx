@@ -3,8 +3,10 @@ import { Header } from '../../components/Header'
 import { useAuth, hasAnyRole } from '@/lib/authContext'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase/client'
+import { GOALS, metaColor } from '@/lib/goals'
 import { DonutChart } from '@/components/ui/charts/DonutChart'
 import { BarChartH } from '@/components/ui/charts/BarChartH'
+import { BarChartV } from '@/components/ui/charts/BarChartV'
 import { Button } from '@/components/ui/Button'
 import { ChevronLeft, Phone, TrendingUp, Target, Users, Award, RefreshCw, CheckCircle, XCircle, AlertTriangle } from 'lucide-react'
 
@@ -33,6 +35,7 @@ interface SdrRow {
 type Preset = 'hoje' | '7d' | '15d' | 'mes' | 'custom'
 
 const COR = { verde: '#34C759', amarelo: '#FF9F0A', vermelho: '#FF3B30', azul: '#2997FF', roxo: '#BF5AF2' }
+const sdrNome = (nome: string | null) => nome || 'Geovana Paiva'
 const pctColor = (p: number, meta: number) => p >= meta ? COR.verde : p >= meta * 0.6 ? COR.amarelo : COR.vermelho
 
 const fmt = (d: Date) => d.toISOString().split('T')[0]
@@ -147,7 +150,7 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
   // ── Ranking por SDR ───────────────────────────────────────────────────
   const sdrMap: Record<string, { ag: number; re: number; ns: number; ca: number; at: number }> = {}
   base.forEach(c => {
-    const nome = c.sdr_nome || 'Sem SDR'
+    const nome = sdrNome(c.sdr_nome)
     if (!sdrMap[nome]) sdrMap[nome] = { ag: 0, re: 0, ns: 0, ca: 0, at: 0 }
     sdrMap[nome].ag++
     if (c.status === 'Realizada') sdrMap[nome].re++
@@ -188,6 +191,23 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
     { label: 'Realizadas', value: realizadas, pct: agendadas > 0 ? realizadas/agendadas*100 : 0,  color: COR.verde   },
     { label: 'Ativadas',   value: ativadas,   pct: agendadas > 0 ? ativadas/agendadas*100 : 0,    color: COR.roxo    },
   ]
+
+  // ── Agendadas por dia × SDR ───────────────────────────────────────────
+  const agendadasPorDia = (() => {
+    // Datas únicas ordenadas
+    const datas = [...new Set(base.map(c => c.date))].sort()
+    // SDRs únicos ordenados
+    const sdrNomes = [...new Set(base.map(c => sdrNome(c.sdr_nome)))].sort()
+    // Mapa data → sdr_nome → contagem
+    const grid: Record<string, Record<string, number>> = {}
+    base.forEach(c => {
+      const d = c.date
+      const s = sdrNome(c.sdr_nome)
+      if (!grid[d]) grid[d] = {}
+      grid[d][s] = (grid[d][s] ?? 0) + 1
+    })
+    return { datas, sdrNomes, grid }
+  })()
 
   const card: React.CSSProperties = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14 }
   const lbl = (t: string) => <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 14 }}>{t}</div>
@@ -247,6 +267,68 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
             </div>
           ))}
         </div>
+
+        {/* Meta do mês — SDR */}
+        {preset === 'mes' && (
+          <div style={{ ...card, padding: '20px', marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>🎯 Meta do mês — SDR</div>
+              <div style={{ display: 'flex', gap: 16, fontSize: 12, color: 'var(--text2)' }}>
+                <span>Agendadas: <strong style={{ color: 'var(--text)' }}>{GOALS.sdr.reunioes_agendadas_mes}</strong></span>
+                <span>Realizadas: <strong style={{ color: 'var(--text)' }}>{GOALS.sdr.reunioes_realizadas_mes}</strong></span>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: sdrs.length > 0 && !isSdr ? 14 : 0 }}>
+              {[
+                { label: 'Agendadas (time)', val: agendadas, meta: GOALS.sdr.reunioes_agendadas_mes },
+                { label: 'Realizadas (time)', val: realizadas, meta: GOALS.sdr.reunioes_realizadas_mes },
+              ].map(({ label, val, meta }) => {
+                const pct = Math.min(100, (val / meta) * 100)
+                const cor = metaColor(pct, 1)
+                return (
+                  <div key={label}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 5 }}>
+                      <span style={{ color: 'var(--text2)', fontWeight: 600 }}>{label}</span>
+                      <span style={{ fontWeight: 800, color: cor }}>{val} / {meta}</span>
+                    </div>
+                    <div style={{ height: 8, background: 'var(--bg-card2)', borderRadius: 20, overflow: 'hidden' }}>
+                      <div style={{ width: `${pct}%`, height: '100%', background: cor, borderRadius: 20, transition: 'width .4s' }} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            {!isSdr && sdrs.length > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10 }}>
+                {sdrs.map(s => {
+                  const pctAg = Math.min(100, (s.agendadas / GOALS.sdr.reunioes_agendadas_mes) * 100)
+                  const pctRe = Math.min(100, (s.realizadas / GOALS.sdr.reunioes_realizadas_mes) * 100)
+                  const corAg = metaColor(pctAg, 1)
+                  const corRe = metaColor(pctRe, 1)
+                  return (
+                    <div key={s.nome} style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: '12px 14px' }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10 }}>{s.nome.split(' ')[0]}</div>
+                      {([
+                        { label: 'Agendadas', val: s.agendadas, meta: GOALS.sdr.reunioes_agendadas_mes, cor: corAg, pct: pctAg },
+                        { label: 'Realizadas', val: s.realizadas, meta: GOALS.sdr.reunioes_realizadas_mes, cor: corRe, pct: pctRe },
+                      ] as const).map(({ label, val, meta, cor, pct }) => (
+                        <div key={label} style={{ marginBottom: 6 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
+                            <span style={{ color: 'var(--text2)' }}>{label}</span>
+                            <span style={{ fontWeight: 700, color: cor }}>{val}/{meta}</span>
+                          </div>
+                          <div style={{ height: 6, background: 'var(--bg-card)', borderRadius: 20, overflow: 'hidden' }}>
+                            <div style={{ width: `${pct}%`, height: '100%', background: cor, borderRadius: 20, transition: 'width .4s' }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Linha 1: Donut + Funil + Motivos */}
         <div style={{ display: 'grid', gridTemplateColumns: '200px 220px 1fr', gap: 16, marginBottom: 16 }}>
@@ -360,6 +442,90 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
                   {sdrs.length === 0 && (
                     <tr><td colSpan={9} style={{ padding: 40, textAlign: 'center', color: 'var(--text2)' }}>Nenhum dado para o período.</td></tr>
                   )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Agendadas por dia × SDR */}
+        {agendadasPorDia.datas.length > 0 && (
+          <div style={{ ...card, overflow: 'hidden', marginBottom: 16 }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                Reuniões Agendadas por Dia
+              </div>
+              <span style={{ fontSize: 12, color: 'var(--text2)' }}>
+                Total: <strong style={{ color: COR.azul }}>{agendadas}</strong>
+                {agendadasPorDia.datas.length > 1 && (
+                  <> · Média: <strong style={{ color: 'var(--text)' }}>
+                    {(agendadas / agendadasPorDia.datas.length).toFixed(1)}/dia
+                  </strong></>
+                )}
+              </span>
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: 'var(--bg-card2)' }}>
+                    <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>
+                      Data
+                    </th>
+                    {agendadasPorDia.sdrNomes.map(sdr => (
+                      <th key={sdr} style={{ padding: '10px 16px', textAlign: 'center', fontSize: 11, fontWeight: 700, color: COR.azul, textTransform: 'uppercase', letterSpacing: '.04em', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>
+                        {sdr.split(' ')[0]}
+                      </th>
+                    ))}
+                    <th style={{ padding: '10px 16px', textAlign: 'center', fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>
+                      Total
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {agendadasPorDia.datas.map((date, i) => {
+                    const total = agendadasPorDia.sdrNomes.reduce((s, sdr) => s + (agendadasPorDia.grid[date]?.[sdr] ?? 0), 0)
+                    return (
+                      <tr key={date}
+                        style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'var(--bg-card2)' }}
+                        onMouseEnter={e => (e.currentTarget.style.background = `color-mix(in srgb, ${COR.azul} 6%, var(--bg-card2))`)}
+                        onMouseLeave={e => (e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : 'var(--bg-card2)')}>
+                        <td style={{ padding: '10px 16px', fontWeight: 600, whiteSpace: 'nowrap', color: 'var(--text2)' }}>
+                          {new Date(date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })}
+                        </td>
+                        {agendadasPorDia.sdrNomes.map(sdr => {
+                          const val = agendadasPorDia.grid[date]?.[sdr] ?? 0
+                          return (
+                            <td key={sdr} style={{ padding: '10px 16px', textAlign: 'center' }}>
+                              {val > 0
+                                ? <span style={{ fontWeight: 800, color: COR.azul, background: `${COR.azul}18`, borderRadius: 20, padding: '2px 10px', fontSize: 13 }}>{val}</span>
+                                : <span style={{ color: 'var(--text2)', fontSize: 12 }}>—</span>
+                              }
+                            </td>
+                          )
+                        })}
+                        <td style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 800, fontSize: 14, color: total > 0 ? 'var(--text)' : 'var(--text2)' }}>
+                          {total || '—'}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {/* Linha de totais */}
+                  <tr style={{ background: 'var(--bg-card2)', borderTop: '2px solid var(--border)' }}>
+                    <td style={{ padding: '11px 16px', fontWeight: 700, fontSize: 12, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                      Total
+                    </td>
+                    {agendadasPorDia.sdrNomes.map(sdr => {
+                      const total = agendadasPorDia.datas.reduce((s, d) => s + (agendadasPorDia.grid[d]?.[sdr] ?? 0), 0)
+                      return (
+                        <td key={sdr} style={{ padding: '11px 16px', textAlign: 'center' }}>
+                          <span style={{ fontWeight: 800, fontSize: 14, color: COR.azul }}>{total}</span>
+                        </td>
+                      )
+                    })}
+                    <td style={{ padding: '11px 16px', textAlign: 'center' }}>
+                      <span style={{ fontWeight: 800, fontSize: 15, color: 'var(--text)' }}>{agendadas}</span>
+                    </td>
+                  </tr>
                 </tbody>
               </table>
             </div>

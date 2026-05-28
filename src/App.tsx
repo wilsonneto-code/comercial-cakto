@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useAuth } from '@/lib/authContext'
 import Home from './pages/Home'
 import Login from './pages/Login'
@@ -22,6 +22,10 @@ import DashboardGC from './pages/DashboardGC'
 import DashboardClosers from './pages/DashboardClosers'
 import DebugMb from './pages/DebugMb'
 import GCAtivacoes from './pages/GCAtivacoes'
+import DashboardTarefasGC from './pages/DashboardTarefasGC'
+import GCTaskAlert from './components/GCTaskAlert'
+import PreviewBanner from './components/PreviewBanner'
+import PlanoCarreira from './pages/PlanoCarreira'
 
 const MAIN_DOMAINS = [
   'localhost',
@@ -32,8 +36,12 @@ const MAIN_DOMAINS = [
   'comercial-cakto.vercel.app',
 ]
 
+const SOCIO_ALLOWED = ['/', '/relatorio-calls', '/dashboards', '/dashboard/', '/metabase', '/ranking', '/plano-carreira', '/login']
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
+  const { pathname } = useLocation()
+
   if (loading) return (
     <div style={{
       minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -47,6 +55,13 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     </div>
   )
   if (!user) return <Navigate to="/login" replace />
+
+  // Sócio sem Admin: só pode acessar páginas permitidas
+  const isSocioOnly = user.role === 'Sócio' && !['Admin'].includes(user.role) && !(user.extra_roles ?? []).includes('Admin')
+  if (isSocioOnly && !SOCIO_ALLOWED.some(p => pathname.startsWith(p))) {
+    return <Navigate to="/relatorio-calls" replace />
+  }
+
   return <>{children}</>
 }
 
@@ -59,6 +74,7 @@ export default function App() {
   }
 
   return (
+    <>
     <Routes>
       {/* ── Public routes ── */}
       <Route path="/login" element={<Login />} />
@@ -86,7 +102,12 @@ export default function App() {
       <Route path="/metabase" element={<ProtectedRoute><Carteiras /></ProtectedRoute>} />
       <Route path="/dashboard-gc" element={<ProtectedRoute><DashboardGC /></ProtectedRoute>} />
       <Route path="/debug-mb" element={<ProtectedRoute><DebugMb /></ProtectedRoute>} />
+      <Route path="/dashboard/tarefas-gc" element={<ProtectedRoute><DashboardTarefasGC /></ProtectedRoute>} />
+      <Route path="/plano-carreira" element={<ProtectedRoute><PlanoCarreira /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    <GCTaskAlert />
+    <PreviewBanner />
+    </>
   )
 }

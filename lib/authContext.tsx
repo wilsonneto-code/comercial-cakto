@@ -25,20 +25,28 @@ export function hasAnyRole(user: User | null, roles: string[]): boolean {
 
 interface AuthCtxValue {
   user: User | null;
+  realUser: User | null;
   loading: boolean;
+  isPreview: boolean;
   signIn: (email: string, password: string) => Promise<{ data: unknown; error: string | null }>;
   signUp: (name: string, email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   logout: () => Promise<void>;
+  startPreview: (target: User) => void;
+  exitPreview: () => void;
 }
 
 const AuthCtx = createContext<AuthCtxValue>({
   user: null,
+  realUser: null,
   loading: true,
+  isPreview: false,
   signIn: async () => ({ data: null, error: null }),
   signUp: async () => ({ error: null }),
   signOut: async () => { },
   logout: async () => { },
+  startPreview: () => {},
+  exitPreview: () => {},
 });
 
 async function fetchProfile(authUser: SupabaseAuthUser): Promise<User> {
@@ -91,10 +99,14 @@ async function fetchProfile(authUser: SupabaseAuthUser): Promise<User> {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser]       = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser]           = useState<User | null>(null);
+  const [loading, setLoading]     = useState(true);
+  const [previewUser, setPreview] = useState<User | null>(null);
   const fetchingRef   = useRef(false);
-  const loadedAuthId  = useRef<string | null>(null); // auth UID já carregado
+  const loadedAuthId  = useRef<string | null>(null);
+
+  const startPreview = useCallback((target: User) => setPreview(target), []);
+  const exitPreview  = useCallback(() => setPreview(null), []);
 
   const signIn = useCallback(async (email: string, password: string) => {
     try {
@@ -172,7 +184,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AuthCtx.Provider value={{ user, loading, signIn, signUp, signOut, logout: signOut }}>
+    <AuthCtx.Provider value={{
+      user: previewUser ?? user,
+      realUser: user,
+      loading,
+      isPreview: !!previewUser,
+      signIn, signUp, signOut, logout: signOut,
+      startPreview, exitPreview,
+    }}>
       {children}
     </AuthCtx.Provider>
   );

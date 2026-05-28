@@ -42,7 +42,7 @@ function closerColor(name: string): string {
 const DAYS_FULL = ['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];
 const MONTHS_PT = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 
-type DbUser  = { id: string; name: string; role: string }
+type DbUser  = { id: string; name: string; role: string; email: string }
 type CallItem = {
   id:                    string
   title:                 string
@@ -59,6 +59,7 @@ type CallItem = {
   ativado:               boolean | null
   motivo_nao_ativacao:   string | null
   sdrNome:               string
+  image_urls:            string[]
 }
 
 function formatInviteText(call: CallItem): string {
@@ -103,13 +104,15 @@ function AgendaContent() {
   const [users, setUsers]         = useState<DbUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving]   = useState(false);
+  const [gcConnected, setGcConnected] = useState<boolean | null>(null);
 
   const [modal, setModal]             = useState(false);
   const [sheetCall, setSheetCall]     = useState<CallItem | null>(null);
   const [editCall, setEditCall]       = useState<CallItem | null>(null);
   const [form, setForm]               = useState({ ...EMPTY_FORM });
   const [closerModal, setCloserModal] = useState<{ id: string; name: string } | null>(null);
-  const [motivoInput, setMotivoInput] = useState('');
+  const [motivoInput,  setMotivoInput]  = useState('');
+  const [motivoImages, setMotivoImages] = useState<File[]>([]);
 
   const [history, setHistory]               = useState<HistoryCall[]>([]);
   const [expandedPeriods, setExpandedPeriods] = useState<Set<string>>(new Set());
@@ -120,9 +123,9 @@ function AgendaContent() {
       setIsLoading(true);
       const [{ data: dbCalls, error: ce }, { data: dbUsers, error: ue }, { data: dbHistory }] = await Promise.all([
         supabase.from('calls')
-          .select('id,title,date,time,end_time,responsible,status,notes,client_email,google_event_id,meet_link,ativado,motivo_nao_ativacao,sdr_nome')
+          .select('id,title,date,time,end_time,responsible,status,notes,client_email,google_event_id,meet_link,ativado,motivo_nao_ativacao,sdr_nome,image_urls')
           .order('date').order('time'),
-        supabase.from('users').select('id,name,role').order('name'),
+        supabase.from('users').select('id,name,role,email').order('name'),
         supabase.from('calls_history')
           .select('id,title,date,time,end_time,responsible,status,notes,client_email,google_event_id,meet_link,period')
           .order('period', { ascending: false }).order('date').order('time'),
@@ -148,6 +151,7 @@ function AgendaContent() {
         ativado:             c.ativado ?? null,
         motivo_nao_ativacao: c.motivo_nao_ativacao ?? null,
         sdrNome:             c.sdr_nome ?? '',
+        image_urls:          (c.image_urls as string[]) ?? [],
         ...(period !== undefined ? { period } : {}),
       });
 
@@ -158,6 +162,41 @@ function AgendaContent() {
     load();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Google Calendar OAuth ──────────────────────────────────────────────────
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase.from('users').select('google_refresh_token').eq('id', user.id).maybeSingle()
+      .then(({ data }) => setGcConnected(!!data?.google_refresh_token));
+    const params = new URLSearchParams(window.location.search);
+    const result = params.get('google_oauth');
+    if (result === 'success') { toast('Google Calendar conectado! ✓', 'success'); setGcConnected(true); }
+    if (result === 'error')   { toast('Erro ao conectar Google Calendar.', 'error'); }
+    if (result) window.history.replaceState({}, '', '/agenda');
+  }, [user?.id]);
+
+  async function connectGoogleCalendar() {
+    const session = (await supabase.auth.getSession()).data.session;
+    const res = await fetch(
+      `${(supabase as any).supabaseUrl}/functions/v1/google-oauth?action=url`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ user_id: user?.id, return_to: '/agenda' }) }
+    );
+    const json = await res.json();
+    if (json.url) window.location.href = json.url;
+    else toast('Erro ao gerar URL de autorização.', 'error');
+  }
+
+  async function disconnectGoogleCalendar() {
+    const session = (await supabase.auth.getSession()).data.session;
+    await fetch(
+      `${(supabase as any).supabaseUrl}/functions/v1/google-oauth?action=disconnect`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ user_id: user?.id }) }
+    );
+    setGcConnected(false);
+    toast('Google Calendar desconectado.', 'info');
+  }
 
   const closers       = users.filter(u => u.role === 'Closer');
   const filteredCalls = activeTab === 'Todos' ? calls : calls.filter(c => c.responsible === activeTab);
@@ -248,7 +287,9 @@ function AgendaContent() {
       toast('Preencha título, data e responsável.', 'error'); return;
     }
     setIsSaving(true);
-    const responsibleName = users.find(u => u.id === form.responsibleId)?.name || '?';
+    const responsibleUser = users.find(u => u.id === form.responsibleId);
+    const responsibleName = responsibleUser?.name || '?';
+    const responsibleEmail = responsibleUser?.email || '';
 
     if (editCall) {
       const patch = {
@@ -276,7 +317,7 @@ function AgendaContent() {
           body: {
             action: 'update', google_event_id: editCall.google_event_id,
             title: form.title, date: form.date, time: form.time || '09:00', end_time: form.endTime || '',
-            closerName: responsibleName, closerEmail: user?.email || '',
+            closerName: responsibleName, closerEmail: responsibleEmail,
             clientEmail: form.clientEmail || '', notes: form.notes,
           },
         }).then(({ error: fnErr }) => {
@@ -313,17 +354,19 @@ function AgendaContent() {
         body: {
           action: 'create',
           title: form.title, date: form.date, time: form.time || '09:00', end_time: form.endTime || '',
-          closerName: responsibleName, closerEmail: user?.email || '',
+          closerName: responsibleName, closerEmail: responsibleEmail,
+          sdrEmail: user?.email || '',
           clientEmail: form.clientEmail || '', notes: form.notes,
         },
       }).then(async ({ data: fnData, error: fnErr }) => {
         if (fnErr) { toast('Call salva, mas falhou no Google Calendar', 'error'); return; }
-        const { eventId, meetLink } = (fnData || {}) as { eventId?: string; meetLink?: string };
+        const { eventId, meetLink, skipped } = (fnData || {}) as { eventId?: string; meetLink?: string; skipped?: boolean };
+        if (skipped) { toast('Google Calendar não conectado para este closer', 'warning'); return; }
         if (eventId) {
           await supabase.from('calls').update({ google_event_id: eventId, meet_link: meetLink ?? '' }).eq('id', newCall.id);
           setCalls(p => p.map(c => c.id === newCall.id ? { ...c, google_event_id: eventId, meet_link: meetLink ?? '' } : c));
+          toast('Sincronizado com Google Calendar ✓', 'success');
         }
-        toast('Sincronizado com Google Calendar ✓', 'success');
       });
     }
   }
@@ -353,12 +396,35 @@ function AgendaContent() {
     toast(`Status: ${status}`, 'success');
   }
 
-  async function saveAtivacao(id: string, ativado: boolean, motivo?: string) {
-    const patch = { ativado, motivo_nao_ativacao: ativado ? null : (motivo ?? '') };
+  async function saveAtivacao(id: string, ativado: boolean, motivo?: string, images?: File[]) {
+    // Faz upload das imagens se houver
+    const uploadedUrls: string[] = []
+    if (!ativado && images && images.length > 0) {
+      for (const file of images) {
+        const ext  = file.name.split('.').pop() ?? 'jpg'
+        const path = `calls/${id}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
+        const { error: upErr } = await supabase.storage
+          .from('ativacoes-arquivos').upload(path, file, { upsert: true })
+        if (!upErr) {
+          const { data: urlData } = supabase.storage.from('ativacoes-arquivos').getPublicUrl(path)
+          if (urlData?.publicUrl) uploadedUrls.push(urlData.publicUrl)
+        }
+      }
+    }
+
+    const existingUrls = calls.find(c => c.id === id)?.image_urls ?? []
+    const allUrls = [...existingUrls, ...uploadedUrls]
+
+    const patch: Record<string, unknown> = {
+      ativado,
+      motivo_nao_ativacao: ativado ? null : (motivo ?? ''),
+      ...(uploadedUrls.length > 0 ? { image_urls: allUrls } : {}),
+    }
     const { error } = await supabase.from('calls').update(patch).eq('id', id);
     if (error) { toast(error.message, 'error'); return; }
-    setCalls(p => p.map(c => c.id === id ? { ...c, ...patch } : c));
-    setSheetCall(prev => prev?.id === id ? { ...prev, ...patch } : prev);
+    setCalls(p => p.map(c => c.id === id ? { ...c, ...patch, image_urls: allUrls } : c));
+    setSheetCall(prev => prev?.id === id ? { ...prev, ...patch, image_urls: allUrls } : prev);
+    setMotivoImages([])
     toast(ativado ? 'Marcado como Ativado ✓' : 'Marcado como Não Ativado', 'success');
   }
 
@@ -630,14 +696,33 @@ function AgendaContent() {
                 <Calendar size={18} color="var(--green)" />
                 <div style={{ fontWeight: 700, fontSize: 14 }}>Google Calendar</div>
               </div>
-              <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 12, lineHeight: 1.5 }}>
-                OAuth Refresh Token ativo.<br />
-                Google Meet gerado automaticamente ao agendar.
+              <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 14, lineHeight: 1.5 }}>
+                Conecte sua conta para criar eventos e links do Meet automaticamente ao agendar calls.
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--green)', fontWeight: 600 }}>
-                <ExternalLink size={13} />
-                Calendário compartilhado configurado
-              </div>
+              {gcConnected === false && (
+                <button onClick={connectGoogleCalendar} style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', width: '100%', justifyContent: 'center',
+                  borderRadius: 8, border: '1px solid #4285F4', cursor: 'pointer',
+                  background: 'color-mix(in srgb, #4285F4 12%, var(--bg-card))',
+                  color: '#4285F4', fontWeight: 700, fontSize: 13, fontFamily: 'inherit',
+                }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12.545,10.239v3.821h5.445c-0.712,2.315-2.647,3.972-5.445,3.972c-3.332,0-6.033-2.701-6.033-6.032c0-3.331,2.701-6.032,6.033-6.032c1.498,0,2.866,0.549,3.921,1.453l2.814-2.814C17.503,2.988,15.139,2,12.545,2C7.021,2,2.543,6.477,2.543,12s4.478,10,10.002,10c8.396,0,10.249-7.85,9.426-11.748L12.545,10.239z"/></svg>
+                  Conectar Google Calendar
+                </button>
+              )}
+              {gcConnected === true && (
+                <button onClick={disconnectGoogleCalendar} style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', width: '100%', justifyContent: 'center',
+                  borderRadius: 8, border: '1px solid var(--green)', cursor: 'pointer',
+                  background: 'color-mix(in srgb, var(--green) 10%, var(--bg-card))',
+                  color: 'var(--green)', fontWeight: 600, fontSize: 13, fontFamily: 'inherit',
+                }}>
+                  ✓ Google Calendar conectado
+                </button>
+              )}
+              {gcConnected === null && (
+                <div style={{ fontSize: 12, color: 'var(--text2)' }}>Verificando...</div>
+              )}
             </div>
           </div>
         </div>
@@ -990,9 +1075,9 @@ function AgendaContent() {
                   </button>
                 </div>
 
-                {/* Campo de motivo */}
+                {/* Campo de motivo + upload de imagens */}
                 {(sheetCall as any)._showMotivo && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <textarea
                       className="inp"
                       rows={2}
@@ -1001,19 +1086,88 @@ function AgendaContent() {
                       placeholder="Informe o motivo da não ativação…"
                       style={{ resize: 'vertical', fontSize: 13 }}
                     />
+
+                    {/* Upload de imagens */}
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text2)',
+                        textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>
+                        Imagens / Comprovantes
+                      </label>
+                      <label style={{
+                        display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px',
+                        borderRadius: 8, border: '1px dashed var(--border)', cursor: 'pointer',
+                        background: 'var(--bg-card2)', fontSize: 13, color: 'var(--text2)',
+                        fontWeight: 600, transition: 'border-color .15s',
+                      }}
+                        onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--action)')}
+                        onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                        </svg>
+                        {motivoImages.length > 0 ? `${motivoImages.length} arquivo(s) selecionado(s)` : 'Selecionar arquivos…'}
+                        <input type="file" multiple accept="image/*,application/pdf"
+                          style={{ display: 'none' }}
+                          onChange={e => {
+                            if (e.target.files) setMotivoImages(p => [...p, ...Array.from(e.target.files!)])
+                          }} />
+                      </label>
+
+                      {/* Preview dos arquivos selecionados */}
+                      {motivoImages.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                          {motivoImages.map((f, i) => (
+                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5,
+                              padding: '4px 8px', borderRadius: 6, background: 'var(--bg-card)',
+                              border: '1px solid var(--border)', fontSize: 11 }}>
+                              <span style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
+                              <button onClick={() => setMotivoImages(p => p.filter((_, j) => j !== i))}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 0, fontSize: 14, lineHeight: 1 }}>×</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button onClick={() => {
-                        saveAtivacao(sheetCall.id, false, motivoInput);
+                        saveAtivacao(sheetCall.id, false, motivoInput, motivoImages);
                         setSheetCall(prev => prev ? { ...prev, _showMotivo: false } as any : prev);
                       }} style={{
                         padding: '7px 16px', borderRadius: 8, border: 'none',
                         background: 'var(--red)', color: '#fff', fontWeight: 700, fontSize: 13,
                         cursor: 'pointer', fontFamily: 'inherit',
                       }}>Salvar</button>
-                      <button onClick={() => setSheetCall(prev => prev ? { ...prev, _showMotivo: false } as any : prev)}
+                      <button onClick={() => { setSheetCall(prev => prev ? { ...prev, _showMotivo: false } as any : prev); setMotivoImages([]); }}
                         style={{ padding: '7px 16px', borderRadius: 8, border: '1px solid var(--border)',
                           background: 'var(--bg-card2)', color: 'var(--text2)', fontWeight: 600, fontSize: 13,
                           cursor: 'pointer', fontFamily: 'inherit' }}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Imagens já salvas */}
+                {!((sheetCall as any)._showMotivo) && sheetCall.image_urls?.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase',
+                      letterSpacing: '.04em', marginBottom: 8 }}>Imagens anexadas</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                      {sheetCall.image_urls.map((url, i) => {
+                        const isImg = /\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(url)
+                        return isImg ? (
+                          <a key={i} href={url} target="_blank" rel="noreferrer">
+                            <img src={url} alt={`anexo-${i+1}`}
+                              style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 8,
+                                border: '1px solid var(--border)', cursor: 'pointer' }} />
+                          </a>
+                        ) : (
+                          <a key={i} href={url} target="_blank" rel="noreferrer"
+                            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px',
+                              borderRadius: 8, background: 'var(--bg-card2)', border: '1px solid var(--border)',
+                              fontSize: 12, color: 'var(--action)', textDecoration: 'none', fontWeight: 600 }}>
+                            📎 Arquivo {i + 1}
+                          </a>
+                        )
+                      })}
                     </div>
                   </div>
                 )}
