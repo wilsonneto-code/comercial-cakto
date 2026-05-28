@@ -23,8 +23,8 @@ const SIZES = {
 };
 
 const VARIANTS: Record<Variant, React.CSSProperties> = {
-  primary:     { background: 'var(--action)', color: '#fff' },
-  secondary:   { background: 'transparent', color: 'var(--text)', border: '1px solid var(--border)' },
+  primary:     { background: 'var(--action)', color: '#E2CFB7', boxShadow: '0 2px 14px var(--action-glow)' },
+  secondary:   { background: 'var(--bg-card2)', color: 'var(--text)', border: '1px solid var(--border)' },
   ghost:       { background: 'transparent', color: 'var(--text2)' },
   destructive: { background: 'color-mix(in srgb, var(--red) 12%, transparent)', color: 'var(--red)', border: '1px solid color-mix(in srgb, var(--red) 25%, transparent)' },
   success:     { background: 'color-mix(in srgb, var(--green) 15%, transparent)', color: 'var(--green)', border: '1px solid color-mix(in srgb, var(--green) 25%, transparent)' },

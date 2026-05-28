@@ -44,14 +44,26 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   if (loading) return (
     <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: '#000', color: '#98989D', fontSize: 14, gap: 10,
+      minHeight: '100vh', display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      background: '#0D0D0B', gap: 16,
     }}>
-      <span style={{ display: 'inline-block', width: 18, height: 18, borderRadius: '50%',
-        border: '2px solid #333', borderTopColor: '#2997FF',
-        animation: 'spin .8s linear infinite' }} />
-      Carregando...
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      <div style={{
+        width: 42, height: 42, borderRadius: 12,
+        background: 'linear-gradient(145deg, #3D7044 0%, #2F5733 100%)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        boxShadow: '0 4px 24px rgba(47,87,51,.5)',
+        animation: 'pulse 2s ease-in-out infinite',
+      }}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E2CFB7" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10z"/>
+          <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>
+        </svg>
+      </div>
+      <span style={{ fontSize: 13, color: '#7A6E62', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 500 }}>
+        Carregando…
+      </span>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}`}</style>
     </div>
   )
   if (!user) return <Navigate to="/login" replace />
