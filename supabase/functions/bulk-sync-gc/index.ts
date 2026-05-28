@@ -69,8 +69,10 @@ async function dcFetch(url: string, opts: RequestInit, h: Record<string,string>,
 
 // Extrai mensagem de erro de dados já parseados (quando .json() foi chamado antes)
 function parsedError(data: any, ctx: string, status: number): string {
-  const msg = data?.message ?? data?.error ?? data?.detail ?? data?.errors?.[0]?.message
-    ?? (typeof data === 'string' ? data : JSON.stringify(data ?? '')).slice(0, 300)
+  const raw = data?.message ?? data?.error ?? data?.detail
+    ?? data?.errors?.[0]?.message ?? data?.errors?.[0]
+    ?? data
+  const msg = (typeof raw === 'string' ? raw : JSON.stringify(raw ?? '')).slice(0, 400)
   return `${ctx} → HTTP ${status}: ${msg || '(sem detalhe)'}`
 }
 
@@ -197,48 +199,84 @@ serve(async (req) => {
       const entry: Record<string, any> = { email, client: nome, gerente, tier, status: 'ok', steps: [] }
 
       try {
-        // ── 1. Busca lead por email ─────────────────────────────────────────
+        // ── Helper: verifica se um lead (por ID) tem email ou telefone ────────
+        async function leadMatchesContact(id: string, eLower: string, ph: string): Promise<boolean> {
+          const r = await dcFetch(`${BASE}/leads/${id}`, {}, h)
+          if (!r.ok) return false
+          const l = await r.json()
+          return (
+            (eLower && (l.email?.toLowerCase() === eLower ||
+              l.contacts?.some((c: any) => c.identifier?.toLowerCase() === eLower))) ||
+            (ph !== '' && (l.phone?.replace(/\D/g, '') === ph ||
+              l.rawPhone?.replace(/\D/g, '') === ph ||
+              l.contacts?.some((c: any) => c.identifier?.replace(/\D/g, '') === ph)))
+          )
+        }
+
+        // ── Helper: busca lead pelo nome que o DC conhece ────────────────────
+        async function findLeadByDcName(dcName: string, matchEmail: string, matchPhone: string): Promise<string | null> {
+          if (!dcName.trim()) return null
+          const r = await dcFetch(`${BASE}/leads?search=${encodeURIComponent(dcName.trim())}&take=20`, {}, h)
+          if (!r.ok) return null
+          const d = await r.json()
+          const eLower = matchEmail.toLowerCase()
+          const ph     = matchPhone.replace(/\D/g, '')
+          const items: any[] = d.data ?? []
+
+          // 1. Match rápido pelos campos da lista (pode não incluir contacts)
+          const quick = items.find((l: any) =>
+            (eLower && (l.email?.toLowerCase() === eLower ||
+              l.contacts?.some((c: any) => c.identifier?.toLowerCase() === eLower))) ||
+            (ph && (l.phone?.replace(/\D/g, '') === ph ||
+              l.rawPhone?.replace(/\D/g, '') === ph ||
+              l.contacts?.some((c: any) => c.identifier?.replace(/\D/g, '') === ph)))
+          )
+          if (quick) return quick.id
+
+          // 2. Resultado único → assume que é o lead correto
+          if (items.length === 1) return items[0].id
+
+          // 3. Múltiplos resultados: busca detalhes de cada um (máx 8) para verificar contatos
+          for (const item of items.slice(0, 8)) {
+            if (await leadMatchesContact(item.id, eLower, ph)) return item.id
+          }
+
+          return null
+        }
+
+        // ── 1. Tenta criar lead diretamente ─────────────────────────────────
+        // Evita pré-busca para economizar chamadas API (limite de recursos DC)
         let leadId: string | null = null
 
-        const srRes  = await dcFetch(`${BASE}/leads?search=${encodeURIComponent(email)}&take=5`, {}, h)
-        const srData = await srRes.json()
-        if (!srRes.ok) {
-          entry.steps.push(`busca_email: HTTP ${srRes.status}`)
-        } else {
-          const byEmail = (srData.data ?? []).find((l: any) =>
-            l.email?.toLowerCase() === email ||
-            l.contacts?.some((c: any) => c.identifier?.toLowerCase() === email)
-          )
-          if (byEmail) { leadId = byEmail.id; entry.leadAction = 'found_email' }
-        }
+        const payload: any = { name: nome || email, email }
+        if (telefone) payload.phone = String(telefone)
+        const crRes  = await dcFetch(`${BASE}/leads`, { method: 'POST', body: JSON.stringify(payload) }, h)
+        const crData = await crRes.json()
 
-        // ── 2. Fallback por telefone ────────────────────────────────────────
-        if (!leadId && telefone) {
-          const digits  = String(telefone).replace(/\D/g, '')
-          const phRes   = await dcFetch(`${BASE}/leads?search=${encodeURIComponent(digits)}&take=5`, {}, h)
-          const phData  = await phRes.json()
-          const byPhone = (phData.data ?? []).find((l: any) =>
-            l.rawPhone === digits || l.phone?.replace(/\D/g, '') === digits
-          )
-          if (byPhone) { leadId = byPhone.id; entry.leadAction = 'found_phone' }
-        }
-
-        // ── 3. Cria lead ────────────────────────────────────────────────────
-        if (!leadId) {
-          const payload: any = { name: nome || email, email }
-          if (telefone) payload.phone = String(telefone)
-          const crRes  = await dcFetch(`${BASE}/leads`, { method: 'POST', body: JSON.stringify(payload) }, h)
-          const crData = await crRes.json()
-          if (!crRes.ok) {
-            entry.status = 'error'
-            entry.error  = parsedError(crData, 'criar_lead', crRes.status)
-            // Tenta recuperar um leadId mesmo assim (alguns erros retornam o objeto criado)
-            if (crData?.id) leadId = crData.id
-            else { results.push(entry); continue }
+        if (crRes.ok) {
+          leadId = crData?.id ?? null
+          entry.leadAction = 'created'
+        } else if (crData?.code === 'lead-with-same-contact-exists') {
+          // Estrutura real: { code, message: { code, message, params: { name, email, phone } } }
+          const params  = crData?.message?.params ?? crData?.params ?? {}
+          const dcName  = (params.name  ?? '').trim()
+          const dcEmail = (params.email ?? email).trim()
+          const dcPhone = String(params.phone ?? telefone ?? '')
+          leadId = await findLeadByDcName(dcName, dcEmail, dcPhone)
+          // Fallback: tenta com nosso nome (pode estar cadastrado com nome diferente)
+          if (!leadId && nome) leadId = await findLeadByDcName(nome, email, String(telefone ?? ''))
+          if (leadId) {
+            entry.leadAction = 'found_after_conflict'
           } else {
-            leadId = crData?.id ?? null
-            entry.leadAction = 'created'
+            entry.status = 'error'
+            entry.error  = `lead existe no DC (nome: "${dcName}") mas não localizado via busca`
+            results.push(entry); continue
           }
+        } else {
+          entry.status = 'error'
+          entry.error  = parsedError(crData, 'criar_lead', crRes.status)
+          if (crData?.id) leadId = crData.id
+          else { results.push(entry); continue }
         }
 
         if (!leadId) {
