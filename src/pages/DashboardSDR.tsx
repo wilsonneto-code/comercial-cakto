@@ -3,7 +3,9 @@ import { Header } from '../../components/Header'
 import { useAuth, hasAnyRole } from '@/lib/authContext'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase/client'
+import { avatarColor } from '@/lib/utils'
 import { GOALS, metaColor } from '@/lib/goals'
+import { isSDRRole } from '@/lib/utils'
 import { DonutChart } from '@/components/ui/charts/DonutChart'
 import { BarChartH } from '@/components/ui/charts/BarChartH'
 import { BarChartV } from '@/components/ui/charts/BarChartV'
@@ -12,10 +14,13 @@ import { ChevronLeft, Phone, TrendingUp, Target, Users, Award, RefreshCw, CheckC
 
 interface Call {
   id: string
+  title: string | null
   date: string
+  time: string | null
   status: 'Agendada' | 'Realizada' | 'No-show' | 'Cancelada'
   sdr_nome: string | null
   responsible: string
+  client_email: string | null
   ativado: boolean
   motivo_nao_ativacao: string | null
 }
@@ -34,12 +39,18 @@ interface SdrRow {
 
 type Preset = 'hoje' | '7d' | '15d' | 'mes' | 'custom'
 
-const COR = { verde: '#34C759', amarelo: '#FF9F0A', vermelho: '#FF3B30', azul: '#2997FF', roxo: '#BF5AF2' }
-const sdrNome = (nome: string | null) => nome || 'Geovana Paiva'
+const COR = { verde: '#34C759', amarelo: '#FF9F0A', vermelho: '#FF3B30', azul: '#2997FF', roxo: '#BF5AF2', ciano: '#5AABB5' }
+const sdrNome = (nome: string | null) => nome || 'Carlos Eduardo'
 const pctColor = (p: number, meta: number) => p >= meta ? COR.verde : p >= meta * 0.6 ? COR.amarelo : COR.vermelho
 
 const fmt = (d: Date) => d.toISOString().split('T')[0]
 const sub = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return fmt(d) }
+
+function lastDayOfMonth(year: number, month: number): string {
+  // month: 1-indexed
+  const d = new Date(year, month, 0) // dia 0 do mês seguinte = último dia do mês atual
+  return fmt(d)
+}
 
 function getRange(preset: Preset, customFrom: string, customTo: string): { inicio: string; fim: string; label: string } {
   const today = new Date()
@@ -47,8 +58,11 @@ function getRange(preset: Preset, customFrom: string, customTo: string): { inici
   if (preset === '7d')   return { inicio: sub(6),     fim: fmt(today), label: 'Últimos 7 dias' }
   if (preset === '15d')  return { inicio: sub(14),    fim: fmt(today), label: 'Últimos 15 dias' }
   if (preset === 'mes') {
-    const mes = fmt(today).slice(0, 7)
-    return { inicio: `${mes}-01`, fim: `${mes}-31`, label: new Date(mes + '-01').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) }
+    const y = today.getFullYear()
+    const m = today.getMonth() + 1  // 1-indexed
+    const inicio = `${y}-${String(m).padStart(2,'0')}-01`
+    const fim    = lastDayOfMonth(y, m)
+    return { inicio, fim, label: new Date(inicio + 'T12:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) }
   }
   const from = customFrom || fmt(today)
   const to   = customTo   || fmt(today)
@@ -107,11 +121,15 @@ export default function DashboardSDR() {
 export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
   const { user } = useAuth()
   const isAdmin = hasAnyRole(user, ['Admin'])
-  const isSdr   = user?.role === 'SDR'
+  const isSdr   = isSDRRole(user?.role)
 
   const [calls, setCalls]         = useState<Call[]>([])
+  const [usersMap, setUsersMap]   = useState<Record<string, string>>({})
   const [isLoading, setIsLoading] = useState(true)
   const [isRefresh, setIsRefresh] = useState(false)
+  const [modalCalls, setModalCalls] = useState<Call[] | null>(null)
+  const [modalTitle, setModalTitle] = useState('')
+  const [modalLabel, setModalLabel] = useState('Reuniões agendadas')
 
   const [preset,     setPreset]     = useState<Preset>('mes')
   const [customFrom, setCustomFrom] = useState('')
@@ -119,13 +137,23 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
 
   const { inicio, fim, label: rangeLabel } = getRange(preset, customFrom, customTo)
 
+  useEffect(() => {
+    supabase.from('users').select('id,name,role').then(({ data }) => {
+      if (data) {
+        const map: Record<string, string> = {}
+        data.forEach((u: any) => { map[u.id] = u.name })
+        setUsersMap(map)
+      }
+    })
+  }, [])
+
   useEffect(() => { load() }, [inicio, fim])
 
   async function load() {
     setIsLoading(true)
     const { data } = await supabase
       .from('calls')
-      .select('id,date,status,sdr_nome,responsible,ativado,motivo_nao_ativacao')
+      .select('id,title,date,time,status,sdr_nome,responsible,client_email,ativado,motivo_nao_ativacao')
       .gte('date', inicio).lte('date', fim)
     setCalls((data ?? []) as Call[])
     setIsLoading(false)
@@ -133,10 +161,13 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
 
   const refresh = async () => { setIsRefresh(true); await load(); setIsRefresh(false) }
 
-  // Filtra pelo próprio SDR se não for admin
+  // SDR e Social Selling veem apenas os próprios dados; admin vê tudo
   const base = isSdr
     ? calls.filter(c => c.sdr_nome === user?.name)
     : calls
+
+  // Para o ranking: inclui todas as calls (null = Carlos Eduardo)
+  const baseRanking = base
 
   // ── Métricas gerais ───────────────────────────────────────────────────
   const agendadas  = base.length
@@ -147,9 +178,9 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
   const pctReal    = agendadas > 0 ? realizadas / agendadas * 100 : 0
   const pctAtiv    = realizadas > 0 ? ativadas / realizadas * 100 : 0
 
-  // ── Ranking por SDR ───────────────────────────────────────────────────
+  // ── Ranking por SDR / Social Selling ─────────────────────────────────
   const sdrMap: Record<string, { ag: number; re: number; ns: number; ca: number; at: number }> = {}
-  base.forEach(c => {
+  baseRanking.forEach(c => {
     const nome = sdrNome(c.sdr_nome)
     if (!sdrMap[nome]) sdrMap[nome] = { ag: 0, re: 0, ns: 0, ca: 0, at: 0 }
     sdrMap[nome].ag++
@@ -227,7 +258,7 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
               {onBack && <Button variant="ghost" icon={ChevronLeft} onClick={onBack}>Voltar</Button>}
               <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>
-                {isSdr ? `Dashboard — ${user?.name}` : 'Dashboard SDR'}
+                {isSdr ? `Dashboard — ${user?.name}` : 'Dashboard SDR / Social Selling'}
               </h1>
             </div>
             <p style={{ margin: 0, fontSize: 13, color: 'var(--text2)' }}>
@@ -388,11 +419,11 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
         {!isSdr && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
             <div style={{ ...card, padding: '20px' }}>
-              {lbl('Calls Agendadas por SDR')}
+              {lbl('Calls Agendadas por SDR / Social Selling')}
               <BarChartH data={barAgendadas} labelKey="label" valueKey="value" color1={COR.azul} color2="#5AB4FF" />
             </div>
             <div style={{ ...card, padding: '20px' }}>
-              {lbl('Calls Realizadas por SDR')}
+              {lbl('Calls Realizadas por SDR / Social Selling')}
               <BarChartH data={barRealizadas} labelKey="label" valueKey="value" color1={COR.verde} color2="#7AE28C" />
             </div>
           </div>
@@ -403,14 +434,14 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
           <div style={{ ...card, padding: '20px', marginBottom: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
               <Award size={14} color={COR.roxo} />
-              {lbl('Ranking SDRs')}
+              {lbl('Ranking SDR / Social Selling')}
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: 'var(--bg-card2)' }}>
-                    {['#', 'SDR', 'Agendadas', 'Realizadas', 'No-show', 'Ativadas', '% Realiz.', '% Ativação', 'Score'].map(h => (
-                      <th key={h} style={{ padding: '10px 14px', textAlign: h === 'SDR' || h === '#' ? 'left' : 'right',
+                    {['#', 'SDR / Social Selling', 'Agendadas', 'Realizadas', 'No-show', 'Canceladas', 'Ativadas', '% Realiz.', '% Ativação', 'Score'].map(h => (
+                      <th key={h} style={{ padding: '10px 14px', textAlign: h === 'SDR / Social Selling' || h === '#' ? 'left' : 'right',
                         fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase',
                         letterSpacing: '.04em', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{h}</th>
                     ))}
@@ -426,7 +457,21 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
                       <td style={{ padding: '11px 14px', textAlign: 'right' }}>{s.agendadas}</td>
                       <td style={{ padding: '11px 14px', textAlign: 'right', color: COR.verde, fontWeight: 700 }}>{s.realizadas}</td>
                       <td style={{ padding: '11px 14px', textAlign: 'right', color: s.noshow > 0 ? COR.amarelo : 'var(--text2)' }}>{s.noshow}</td>
-                      <td style={{ padding: '11px 14px', textAlign: 'right', color: COR.roxo, fontWeight: 700 }}>{s.ativadas}</td>
+                      <td style={{ padding: '11px 14px', textAlign: 'right', color: s.canceladas > 0 ? COR.vermelho : 'var(--text2)' }}>{s.canceladas}</td>
+                      <td
+                        style={{ padding: '11px 14px', textAlign: 'right', color: COR.roxo, fontWeight: 700, cursor: s.ativadas > 0 ? 'pointer' : 'default' }}
+                        onClick={s.ativadas > 0 ? (e) => {
+                          e.stopPropagation()
+                          const ativs = baseRanking.filter(c => sdrNome(c.sdr_nome) === s.nome && c.ativado)
+                          setModalLabel('Ativações')
+                          setModalCalls(ativs)
+                          setModalTitle(`${s.nome}`)
+                        } : undefined}
+                      >
+                        <span style={s.ativadas > 0 ? { textDecoration: 'underline dotted', textUnderlineOffset: 3 } : {}}>
+                          {s.ativadas}
+                        </span>
+                      </td>
                       <td style={{ padding: '11px 14px', textAlign: 'right' }}>
                         <span style={{ color: pctColor(s.pctRealizacao, 80), fontWeight: 700 }}>{s.pctRealizacao.toFixed(1)}%</span>
                       </td>
@@ -440,7 +485,7 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
                     </tr>
                   ))}
                   {sdrs.length === 0 && (
-                    <tr><td colSpan={9} style={{ padding: 40, textAlign: 'center', color: 'var(--text2)' }}>Nenhum dado para o período.</td></tr>
+                    <tr><td colSpan={10} style={{ padding: 40, textAlign: 'center', color: 'var(--text2)' }}>Nenhum dado para o período.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -494,17 +539,24 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
                         </td>
                         {agendadasPorDia.sdrNomes.map(sdr => {
                           const val = agendadasPorDia.grid[date]?.[sdr] ?? 0
+                          const callsForCell = base.filter(c => c.date === date && sdrNome(c.sdr_nome) === sdr)
                           return (
                             <td key={sdr} style={{ padding: '10px 16px', textAlign: 'center' }}>
                               {val > 0
-                                ? <span style={{ fontWeight: 800, color: COR.azul, background: `${COR.azul}18`, borderRadius: 20, padding: '2px 10px', fontSize: 13 }}>{val}</span>
+                                ? <span
+                                    onClick={() => { setModalLabel('Reuniões agendadas'); setModalCalls(callsForCell); setModalTitle(`${sdr.split(' ')[0]} — ${new Date(date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })}`) }}
+                                    style={{ fontWeight: 800, color: COR.azul, background: `${COR.azul}18`, borderRadius: 20, padding: '2px 10px', fontSize: 13, cursor: 'pointer' }}>{val}</span>
                                 : <span style={{ color: 'var(--text2)', fontSize: 12 }}>—</span>
                               }
                             </td>
                           )
                         })}
-                        <td style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 800, fontSize: 14, color: total > 0 ? 'var(--text)' : 'var(--text2)' }}>
-                          {total || '—'}
+                        <td style={{ padding: '10px 16px', textAlign: 'center' }}>
+                          {total > 0
+                            ? <span
+                                onClick={() => { setModalLabel('Reuniões agendadas'); setModalCalls(base.filter(c => c.date === date)); setModalTitle(`Todas as calls — ${new Date(date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })}`) }}
+                                style={{ fontWeight: 800, fontSize: 14, color: 'var(--text)', cursor: 'pointer', textDecoration: 'underline dotted' }}>{total}</span>
+                            : <span style={{ color: 'var(--text2)', fontSize: 14 }}>—</span>}
                         </td>
                       </tr>
                     )
@@ -578,6 +630,75 @@ export function DashSDRContent({ onBack }: { onBack?: () => void } = {}) {
         })()}
 
       </div>
+
+      {/* ── Modal de calls ─────────────────────────────────────────────── */}
+      {modalCalls && (
+        <div
+          onClick={() => setModalCalls(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.65)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, width: '100%', maxWidth: 640, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 60px rgba(0,0,0,.6)', overflow: 'hidden' }}>
+
+            {/* Header */}
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: modalLabel === 'Ativações' ? COR.roxo : COR.azul, marginBottom: 2 }}>{modalLabel}</div>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>{modalTitle}</div>
+              </div>
+              <button onClick={() => setModalCalls(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text2)', fontSize: 20, lineHeight: 1, padding: 4 }}>×</button>
+            </div>
+
+            {/* Lista */}
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {modalCalls.length === 0 ? (
+                <div style={{ padding: 40, textAlign: 'center', color: 'var(--text2)', fontSize: 14 }}>Nenhuma call encontrada.</div>
+              ) : modalCalls.map((c, i) => {
+                const STATUS_COLOR: Record<string, string> = { Realizada: COR.verde, 'No-show': COR.amarelo, Cancelada: COR.vermelho, Agendada: COR.azul }
+                const color = STATUS_COLOR[c.status] ?? 'var(--text2)'
+                return (
+                  <div key={c.id} style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 14 }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-card2)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0, boxShadow: `0 0 6px ${color}` }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {c.title || c.client_email || `Call #${i + 1}`}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, marginTop: 3, flexWrap: 'wrap' }}>
+                        {c.client_email && c.title && (
+                          <span style={{ fontSize: 12, color: 'var(--text2)' }}>{c.client_email}</span>
+                        )}
+                        {c.responsible && usersMap[c.responsible] && (() => {
+                          const nome = usersMap[c.responsible]
+                          const cor  = avatarColor(nome)
+                          return (
+                            <span style={{ fontSize: 11, fontWeight: 700, color: cor, background: `${cor}22`, padding: '1px 8px', borderRadius: 20 }}>
+                              → {nome.split(' ')[0]}
+                            </span>
+                          )
+                        })()}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                      {c.time && <span style={{ fontSize: 12, color: 'var(--text2)' }}>{c.time.slice(0,5)}</span>}
+                      <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: `${color}18`, color }}>{c.status}</span>
+                      {c.ativado && <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: `${COR.verde}18`, color: COR.verde }}>✓ Ativado</span>}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 12, color: 'var(--text2)' }}>{modalCalls.length} call{modalCalls.length !== 1 ? 's' : ''}</span>
+              <button onClick={() => setModalCalls(null)} style={{ padding: '7px 18px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card2)', color: 'var(--text2)', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, fontSize: 13 }}>Fechar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
     </>
   )
