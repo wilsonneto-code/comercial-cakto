@@ -100,7 +100,6 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
     const prevMonthStart = format(startOfMonth(subMonths(now, 1)), 'yyyy-MM-dd')
     const prevMonthEnd = format(endOfMonth(subMonths(now, 1)), 'yyyy-MM-dd')
     Promise.all([
-      // activations table (closers)
       supabase.from('activations').select('id', { count: 'exact', head: true }).eq('date', todayStr),
       supabase.from('activations').select('id', { count: 'exact', head: true }).eq('date', yesterdayStr),
       supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', weekStart).lte('date', todayStr),
@@ -108,23 +107,15 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
       supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', monthStart).lte('date', todayStr),
       supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', prevMonthStart).lte('date', prevMonthEnd),
       supabase.from('activations').select('id', { count: 'exact', head: true }),
-      // calls com ativado=true (SDR)
-      supabase.from('calls').select('id', { count: 'exact', head: true }).eq('date', todayStr).eq('ativado', true),
-      supabase.from('calls').select('id', { count: 'exact', head: true }).eq('date', yesterdayStr).eq('ativado', true),
-      supabase.from('calls').select('id', { count: 'exact', head: true }).gte('date', weekStart).lte('date', todayStr).eq('ativado', true),
-      supabase.from('calls').select('id', { count: 'exact', head: true }).gte('date', prevWeekStart).lte('date', prevWeekEnd).eq('ativado', true),
-      supabase.from('calls').select('id', { count: 'exact', head: true }).gte('date', monthStart).lte('date', todayStr).eq('ativado', true),
-      supabase.from('calls').select('id', { count: 'exact', head: true }).gte('date', prevMonthStart).lte('date', prevMonthEnd).eq('ativado', true),
-      supabase.from('calls').select('id', { count: 'exact', head: true }).eq('ativado', true),
-    ]).then(([r1, r2, r3, r4, r5, r6, r7, c1, c2, c3, c4, c5, c6, c7]) => {
+    ]).then(([r1, r2, r3, r4, r5, r6, r7]) => {
       setKpis({
-        today:     (r1.count ?? 0) + (c1.count ?? 0),
-        yesterday: (r2.count ?? 0) + (c2.count ?? 0),
-        week:      (r3.count ?? 0) + (c3.count ?? 0),
-        weekPrev:  (r4.count ?? 0) + (c4.count ?? 0),
-        month:     (r5.count ?? 0) + (c5.count ?? 0),
-        monthPrev: (r6.count ?? 0) + (c6.count ?? 0),
-        total:     (r7.count ?? 0) + (c7.count ?? 0),
+        today:     r1.count ?? 0,
+        yesterday: r2.count ?? 0,
+        week:      r3.count ?? 0,
+        weekPrev:  r4.count ?? 0,
+        month:     r5.count ?? 0,
+        monthPrev: r6.count ?? 0,
+        total:     r7.count ?? 0,
       })
     })
   }, [])
