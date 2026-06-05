@@ -12,20 +12,22 @@ import { Field, Sel } from '@/components/ui/Field'
 import { Divider } from '@/components/ui/Divider'
 import { DateFilter, DateRange } from '@/components/ui/DateFilter'
 import { supabase } from '@/lib/supabase/client'
-import { capitalize, formatDate, CHANNEL_COLORS } from '@/lib/utils'
+import { logActivity } from '@/lib/activityLog'
+import { capitalize, formatDate, CHANNEL_COLORS, isSDRRole } from '@/lib/utils'
 import type { ActivationChannel } from '@/lib/supabase/database.types'
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subWeeks, subMonths, subDays } from 'date-fns'
+
+const CAMPANHAS = ['Low Ticket', 'Taxa adicional', 'Iphone', 'Churn Antigos', 'Churn Recuperado'] as const
 
 type DbActivation = {
   id: string; client: string; email: string | null; phone: string | null
   channel: string; responsible: string; date: string; time: string | null
   sdr_id: string | null; sdr_nome: string | null
-  // ATENÇÃO: a coluna `indicado_por` deve existir na tabela `activations` do Supabase.
-  // Se não existir, crie-a como: indicado_por text
   indicado_por: string | null
   notes: string | null
   image_urls: string[] | null
   faturamento_mensal: number | null
+  campanha: string | null
 }
 type DbUser  = { id: string; name: string; email: string | null; role: string; team_id: string | null; extra_roles: string[] | null }
 type DbTeam  = { id: string; name: string }
@@ -45,7 +47,7 @@ function gerentePorFaturamento(fat: number | null): string | null {
   if (fat <= 250000) return GERENTE_POR_FUNIL.Growth
   return GERENTE_POR_FUNIL.Enterprise
 }
-const EMPTY_FORM = { client: '', email: '', channel: 'Inbound', responsible: '', date: '', phone: '+55 ', sdr_id: '', notes: '', images: [] as File[], faturamento_mensal: '' }
+const EMPTY_FORM = { client: '', email: '', channel: 'Inbound', responsible: '', date: '', phone: '+55 ', sdr_id: '', notes: '', images: [] as File[], faturamento_mensal: '', campanha: '' }
 const PER_PAGE = 5
 
 const DEFAULT_RANGE: DateRange = {
@@ -98,6 +100,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
     const prevMonthStart = format(startOfMonth(subMonths(now, 1)), 'yyyy-MM-dd')
     const prevMonthEnd = format(endOfMonth(subMonths(now, 1)), 'yyyy-MM-dd')
     Promise.all([
+      // activations table (closers)
       supabase.from('activations').select('id', { count: 'exact', head: true }).eq('date', todayStr),
       supabase.from('activations').select('id', { count: 'exact', head: true }).eq('date', yesterdayStr),
       supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', weekStart).lte('date', todayStr),
@@ -105,12 +108,23 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
       supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', monthStart).lte('date', todayStr),
       supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', prevMonthStart).lte('date', prevMonthEnd),
       supabase.from('activations').select('id', { count: 'exact', head: true }),
-    ]).then(([r1, r2, r3, r4, r5, r6, r7]) => {
+      // calls com ativado=true (SDR)
+      supabase.from('calls').select('id', { count: 'exact', head: true }).eq('date', todayStr).eq('ativado', true),
+      supabase.from('calls').select('id', { count: 'exact', head: true }).eq('date', yesterdayStr).eq('ativado', true),
+      supabase.from('calls').select('id', { count: 'exact', head: true }).gte('date', weekStart).lte('date', todayStr).eq('ativado', true),
+      supabase.from('calls').select('id', { count: 'exact', head: true }).gte('date', prevWeekStart).lte('date', prevWeekEnd).eq('ativado', true),
+      supabase.from('calls').select('id', { count: 'exact', head: true }).gte('date', monthStart).lte('date', todayStr).eq('ativado', true),
+      supabase.from('calls').select('id', { count: 'exact', head: true }).gte('date', prevMonthStart).lte('date', prevMonthEnd).eq('ativado', true),
+      supabase.from('calls').select('id', { count: 'exact', head: true }).eq('ativado', true),
+    ]).then(([r1, r2, r3, r4, r5, r6, r7, c1, c2, c3, c4, c5, c6, c7]) => {
       setKpis({
-        today: r1.count ?? 0, yesterday: r2.count ?? 0,
-        week: r3.count ?? 0, weekPrev: r4.count ?? 0,
-        month: r5.count ?? 0, monthPrev: r6.count ?? 0,
-        total: r7.count ?? 0,
+        today:     (r1.count ?? 0) + (c1.count ?? 0),
+        yesterday: (r2.count ?? 0) + (c2.count ?? 0),
+        week:      (r3.count ?? 0) + (c3.count ?? 0),
+        weekPrev:  (r4.count ?? 0) + (c4.count ?? 0),
+        month:     (r5.count ?? 0) + (c5.count ?? 0),
+        monthPrev: (r6.count ?? 0) + (c6.count ?? 0),
+        total:     (r7.count ?? 0) + (c7.count ?? 0),
       })
     })
   }, [])
@@ -134,9 +148,10 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
       const [{ data: acts, error: ae }, { data: usrs, error: ue }, { data: tms }] = await Promise.all([
         supabase
           .from('activations')
-          .select('id,client,email,phone,channel,responsible,date,time,sdr_id,sdr_nome,indicado_por,notes,image_urls,faturamento_mensal')
+          .select('id,client,email,phone,channel,responsible,date,time,sdr_id,sdr_nome,indicado_por,notes,image_urls,faturamento_mensal,campanha')
           .gte('date', dateRange.startDate)
           .lte('date', dateRange.endDate)
+          .or('gc_ativacao.is.null,gc_ativacao.is.false')
           .order('date', { ascending: false })
           .order('time', { ascending: false }),
         supabase.from('users').select('id,name,email,role,extra_roles,team_id').order('name'),
@@ -164,18 +179,21 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
   }
 
   // SDRs disponíveis: role principal SDR ou SDR em extra_roles (ex: Carlos Eduardo, Geovana)
-  const sdrOptions = users.filter(u => u.role === 'SDR' || u.extra_roles?.includes('SDR'))
+  const sdrOptions = users.filter(u => isSDRRole(u.role) || u.extra_roles?.includes('SDR') || u.extra_roles?.includes('Social Selling'))
   const allSdrs = sdrOptions
 
   // Ranking: computed from the already-filtered activations (respects date range)
   const rankingDisplay = useMemo(() => {
     const counts: Record<string, number> = {}
-    activations.forEach(a => { counts[a.responsible] = (counts[a.responsible] || 0) + 1 })
+    // Exclui ativações de GC (gc_ativacao = true) do ranking de closers
+    activations.filter(a => !(a as any).gc_ativacao).forEach(a => { counts[a.responsible] = (counts[a.responsible] || 0) + 1 })
     return Object.entries(counts)
       .map(([userId, count]) => {
         const u = users.find(u => u.id === userId)
         return { userId, activations: count, name: u?.name || '—', role: u?.role || '' }
       })
+      // Filtra fora usuários com cargo Gerente de Contas
+      .filter(r => r.role !== 'Gerente de Contas')
       .sort((a, b) => b.activations - a.activations)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activations, users])
@@ -258,6 +276,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
         notes: form.notes || null,
         faturamento_mensal: form.faturamento_mensal ? parseFloat(form.faturamento_mensal.replace(/\./g,'').replace(',','.')) || null : null,
         gerente_id: gerentePorFaturamento(form.faturamento_mensal ? parseFloat(form.faturamento_mensal) || null : null),
+        campanha: form.campanha || null,
         ...(imageUrls.length > 0 ? { image_urls: imageUrls } : {}),
       }
       const { error } = await supabase.from('activations').update(patch).eq('id', modalEdit.id)
@@ -265,6 +284,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
       if (error) { toast(error.message, 'error'); return }
       setActivations(p => p.map(a => a.id === modalEdit.id ? { ...a, ...patch } : a))
       toast('Ativação atualizada!', 'success')
+      void logActivity(user!.id, user!.name, 'update', 'ativacao', capitalize(form.client), `Editou a ativação de ${capitalize(form.client)}`)
       setModalEdit(null)
 
       // Sincroniza com DataCrazy se tiver arquivos ou notas novas
@@ -340,6 +360,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
         image_urls:         imageUrls,
         faturamento_mensal: form.faturamento_mensal ? parseFloat(form.faturamento_mensal.replace(/\./g,'').replace(',','.')) || null : null,
         gerente_id: gerentePorFaturamento(form.faturamento_mensal ? parseFloat(form.faturamento_mensal) || null : null),
+        campanha:           form.campanha || null,
       }
       const { data, error } = await supabase.from('activations').insert(row).select().single()
       setIsSaving(false)
@@ -351,6 +372,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
       }
       setActivations(p => [data as DbActivation, ...p])
       toast('Cliente ativado com sucesso!', 'success')
+      void logActivity(user!.id, user!.name, 'create', 'ativacao', capitalize(form.client), `Ativou o cliente ${capitalize(form.client)} (${emailSanitized})`)
       setModalNew(false)
 
       // Calcula TPV via Metabase (fire-and-forget)
@@ -597,6 +619,16 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
           placeholder="Selecione o SDR… (opcional)" />
       </Field>
 
+      {/* Campanha */}
+      <Field label="Campanha">
+        <Sel
+          value={form.campanha}
+          onChange={v => setForm(p => ({ ...p, campanha: v }))}
+          options={CAMPANHAS.map(c => ({ value: c, label: c }))}
+          placeholder="Selecione a campanha (opcional)"
+        />
+      </Field>
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field label="Data de Ativação" required>
           <input className="inp" type="date" value={form.date} onChange={setF('date')} />
@@ -824,12 +856,12 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
               <thead>
                 <tr>
                   <th>Data/Hora</th><th>Cliente</th><th>Email</th>
-                  <th>Canal</th><th>Responsável</th><th>SDR</th><th>Telefone</th><th>Ações</th>
+                  <th>Canal</th><th>Responsável</th><th>SDR</th><th>Campanha</th><th>Telefone</th><th>Ações</th>
                 </tr>
               </thead>
               <tbody>
                 {paginated.length === 0 && (
-                  <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32 }}>
+                  <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32 }}>
                     Nenhuma ativação encontrada.
                   </td></tr>
                 )}
@@ -864,6 +896,11 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
                           <span style={{ fontSize: 12, color: 'var(--text2)' }}>—</span>
                         )}
                       </td>
+                      <td>
+                        {a.campanha
+                          ? <Badge label={a.campanha} color="var(--cyan)" />
+                          : <span style={{ fontSize: 12, color: 'var(--text2)' }}>—</span>}
+                      </td>
                       <td style={{ fontSize: 13 }}>{a.phone}</td>
                       <td>
                         <div style={{ display: 'flex', gap: 4 }}>
@@ -889,6 +926,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
                                 phone: a.phone || '', channel: a.channel, responsible: a.responsible,
                                 date: a.date, sdr_id: a.sdr_id || '', notes: a.notes || '',
                                 faturamento_mensal: a.faturamento_mensal != null ? String(a.faturamento_mensal) : '',
+                                campanha: a.campanha || '',
                                 images: [] })
                               setModalEdit(a)
                             }}
@@ -969,6 +1007,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
                   ['Canal', <Badge key="c" label={sheetView.channel} color={CHANNEL_COLORS[sheetView.channel] || 'var(--action)'} />],
                   ['Responsável', getUserName(sheetView.responsible)],
                   ['SDR', sdrName || '—'],
+                  ...(sheetView.campanha ? [['Campanha', <Badge key="camp" label={sheetView.campanha} color="var(--cyan)" />]] : []),
                   ['Telefone', sheetView.phone || '—'],
                   ['Data', `${formatDate(sheetView.date)} às ${sheetView.time || ''}`],
                   ...(fat ? [['Faturamento', <span key="fat" style={{ fontWeight: 700, color: tierColor }}>{fat.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })} / mês · {tier}</span>]] : []),
