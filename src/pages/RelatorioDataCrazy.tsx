@@ -1,486 +1,278 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { RefreshCw, Phone, Users, TrendingUp, Filter } from 'lucide-react'
 import { useAuth } from '@/lib/authContext'
 import { Header } from '@/components/Header'
-import { DonutChart } from '@/components/ui/charts/DonutChart'
-import { BarChartH } from '@/components/ui/charts/BarChartH'
+import { Avatar } from '@/components/ui/Avatar'
 import { supabase } from '@/lib/supabase/client'
-import { Loader2, RefreshCw } from 'lucide-react'
 
-const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
-const PIPELINE_COLORS  = ['#2563eb', '#7c3aed', '#059669']
-const SDR_COLORS       = ['#0891b2', '#d97706', '#be185d']
-const STAGE_COLORS = [
-  '#2563eb','#7c3aed','#059669','#d97706','#dc2626',
-  '#0891b2','#65a30d','#9333ea','#ea580c','#0284c7',
-]
-
-type Stage    = { id: string; name: string; index: number; count: number }
-type Activity = { id: string; title: string; type: string; createdAt: string; stageId: string | null; stageName: string }
-type Business = {
-  id: string; leadId: string; leadName: string; leadEmail: string
-  stageId: string; stageName: string; createdAt: string; updatedAt: string
-  lastMovedAt: string; total: number; activities?: Activity[]
+type Lead = {
+  leadId: string; leadName: string; leadEmail: string; phone: string
+  esteira: string; sdr: string; stage: string
+  origens: string[]; callAgendada: boolean; closer: string; closerTipo: string
+  lastMovedAt: string
 }
-type Pipeline   = { pipeline: string; closer: string; type: string; pipelineId: string; stages: Stage[]; businesses: Business[] }
-type ReportData = { pipelines: Pipeline[]; fetchedAt: string }
+type Stats = Record<string, { total: number; cadu: number; geovana: number; callAgendada: number; clienteAtivo: number; leads: number; qualificados: number }>
+type ReportData = {
+  leads: Lead[]
+  stats: Stats
+  totals: { total: number; cadu: number; geovana: number; callAgendada: number; leadsTotal: number; qualificadosTotal: number }
+  fetchedAt: string
+}
+
+const CAMPANHA_COLORS: Record<string, string> = {
+  'Campanha Low Ticket':    'var(--action)',
+  'Campanha Meta - Ads':    '#2BB9FF',
+  'Formulário Dist. Leads': '#BF5AF2',
+  'Campanha Juros':         '#F59E0B',
+}
+const ESTEIRA_COLORS: Record<string, string> = {
+  'Esteira Cadu':    '#07BA1C',
+  'Esteira Geovana': '#5AABB5',
+}
+const fmt = (d: string) => d ? new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '—'
+
+function KpiBox({ label, value, sub, color, icon }: { label: string; value: number | string; sub?: string; color: string; icon: React.ReactNode }) {
+  return (
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ width: 32, height: 32, borderRadius: 8, background: `color-mix(in srgb, ${color} 15%, transparent)`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{icon}</div>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em' }}>{label}</span>
+      </div>
+      <div style={{ fontSize: 32, fontWeight: 800, color, lineHeight: 1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: 'var(--text2)' }}>{sub}</div>}
+    </div>
+  )
+}
 
 export default function RelatorioDataCrazy() {
   const { user, loading } = useAuth()
   const navigate = useNavigate()
-  useEffect(() => { if (!loading && !user) navigate('/login') }, [user, loading, navigate])
+  useEffect(() => { if (!loading && !user) navigate('/login') }, [user, loading])
   if (loading || !user) return null
-  return <ReportContent />
+  return <Content />
 }
 
-function ReportContent() {
-  const [data, setData]           = useState<ReportData | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError]         = useState('')
-  const [selectedMonth, setSelectedMonth] = useState<string>('all')
-  const [selectedPipeline, setSelectedPipeline] = useState<string>('all')
-  const [activeTab, setActiveTab] = useState<'funil' | 'sdr' | 'negocios' | 'desempenho'>('funil')
+function Content() {
+  const [data,       setData]       = useState<ReportData | null>(null)
+  const [isLoading,  setIsLoading]  = useState(true)
+  const [error,      setError]      = useState('')
+  const [filterEst,  setFilterEst]  = useState('all')
+  const [filterCamp, setFilterCamp] = useState('all')
+  const [filterCall, setFilterCall] = useState('all')
+  const [search,     setSearch]     = useState('')
+  const [dateFrom,   setDateFrom]   = useState('2026-05-30')
+  const [dateTo,     setDateTo]     = useState(new Date().toISOString().slice(0, 10))
 
   async function load() {
     setIsLoading(true); setError('')
-    const { data: res, error: err } = await supabase.functions.invoke('datacrazy-report')
-    if (err || res?.error) { setError(err?.message ?? res?.error ?? 'Erro ao carregar'); setIsLoading(false); return }
-    setData(res as ReportData)
+    const { data: res, error: err } = await supabase.functions.invoke('datacrazy-report', {
+      body: { leads_report: true, startDate: dateFrom || undefined, endDate: dateTo || undefined },
+    })
+    if (err || res?.error) setError(err?.message ?? res?.error ?? 'Erro ao carregar')
+    else setData(res as ReportData)
     setIsLoading(false)
   }
 
   useEffect(() => { load() }, [])
 
-  // Meses disponíveis baseados em lastMovedAt
-  const availableMonths = data ? [...new Set(
-    data.pipelines.flatMap(p => p.businesses.map(b => (b.lastMovedAt ?? b.createdAt)?.slice(0, 7) ?? ''))
-  )].filter(Boolean).sort((a, b) => b.localeCompare(a)) : []
+  const leads  = data?.leads ?? []
+  const stats  = data?.stats ?? {}
+  const totals = data?.totals ?? { total: 0, cadu: 0, geovana: 0, callAgendada: 0 }
 
-  // Negócios filtrados por mês (lastMovedAt) — usado na tabela e KPIs
-  function filteredBusinesses(p: Pipeline) {
-    if (selectedMonth === 'all') return p.businesses
-    return p.businesses.filter(b => (b.lastMovedAt ?? b.createdAt ?? '').startsWith(selectedMonth))
+  const filtered = leads.filter(l => {
+    if (filterEst  !== 'all' && l.esteira !== filterEst)                       return false
+    if (filterCamp !== 'all' && !l.origens.includes(filterCamp))               return false
+    if (filterCall === 'sim' && !l.callAgendada)                               return false
+    if (filterCall === 'nao' && l.callAgendada)                                return false
+    if (search && !l.leadName.toLowerCase().includes(search.toLowerCase()) &&
+                  !l.leadEmail.toLowerCase().includes(search.toLowerCase()))   return false
+    return true
+  })
+
+  const selStyle: React.CSSProperties = {
+    fontSize: 13, padding: '7px 12px', borderRadius: 8,
+    border: '1px solid var(--border)', background: 'var(--bg-card2)',
+    color: 'var(--text)', cursor: 'pointer', fontFamily: 'inherit',
   }
-
-  // Para o FUNIL: conta movimentos por etapa no mês selecionado
-  // Cada negócio que foi movido para uma etapa naquele mês conta como 1 movimento naquela etapa
-  // SDR permite repetição do mesmo lead em etapas diferentes (lastMovedAt por negócio)
-  function stageMovements(p: Pipeline, stageId: string): number {
-    if (selectedMonth === 'all') {
-      return p.businesses.filter(b => b.stageId === stageId).length
-    }
-    return p.businesses.filter(b =>
-      b.stageId === stageId &&
-      (b.lastMovedAt ?? b.createdAt ?? '').startsWith(selectedMonth)
-    ).length
+  const thStyle: React.CSSProperties = {
+    padding: '10px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700,
+    color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em',
+    whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)', background: 'var(--bg-card2)',
   }
-
-  const allPipelines    = data?.pipelines ?? []
-  const closerPipelines = allPipelines.filter(p => p.type === 'closer').filter(p =>
-    selectedPipeline === 'all' || p.pipeline === selectedPipeline
-  )
-  const sdrPipelines = allPipelines.filter(p => p.type === 'sdr').filter(p =>
-    selectedPipeline === 'all' || p.pipeline === selectedPipeline
-  )
-  const pipelines = closerPipelines
-
-  // KPIs globais (baseados em todos os negócios sem filtro de mês)
-  const allBizTotal  = pipelines.flatMap(p => p.businesses)
-  const allBizFiltered = pipelines.flatMap(p => filteredBusinesses(p))
-  const totalDeals   = allBizTotal.length
-  const clienteAtivo = allBizTotal.filter(b => b.stageName === 'Cliente Ativo' || b.stageName === 'Cliente Ativo (Campanha)').length
-  const perdidos     = allBizTotal.filter(b => b.stageName.toLowerCase().includes('perdido') || b.stageName.toLowerCase().includes('desqualificado')).length
-  const taxaConv     = totalDeals > 0 ? Math.round((clienteAtivo / totalDeals) * 100) : 0
-
-  if (isLoading) return (
-    <>
-      <Header />
-      <div className="page-wrap" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 300, gap: 10, color: 'var(--text2)' }}>
-        <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} />
-        <span style={{ fontSize: 14 }}>Carregando dados do DataCrazy…</span>
-        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-      </div>
-    </>
-  )
-
-  if (error) return (
-    <>
-      <Header />
-      <div className="page-wrap" style={{ textAlign: 'center', padding: 64, color: 'var(--red)' }}>
-        <div style={{ marginBottom: 12 }}>Erro: {error}</div>
-        <button onClick={load} style={{ padding: '8px 20px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card2)', color: 'var(--text)', cursor: 'pointer', fontFamily: 'inherit' }}>
-          Tentar novamente
-        </button>
-      </div>
-    </>
-  )
+  const tdStyle: React.CSSProperties = { padding: '10px 14px', borderBottom: '1px solid var(--border)', fontSize: 13 }
 
   return (
     <>
       <Header />
       <div className="page-wrap">
 
-        {/* ── Cabeçalho ─────────────────────────────────────────────────────── */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
           <div>
-            <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-.02em', marginBottom: 2 }}>Relatório de Pipeline</h1>
-            <div style={{ fontSize: 13, color: 'var(--text2)' }}>
-              {selectedMonth === 'all' ? 'Todos os movimentos' : `Movimentos em ${MONTHS[Number(selectedMonth.split('-')[1]) - 1]} ${selectedMonth.split('-')[0]}`}
-            </div>
+            <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-.02em', margin: 0 }}>Pipeline — Campanhas</h1>
+            {data?.fetchedAt && <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>Atualizado em {new Date(data.fetchedAt).toLocaleString('pt-BR')}</div>}
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}
-              style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text)', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer' }}>
-              <option value="all">Todos os meses</option>
-              {availableMonths.map(m => {
-                const [y, mo] = m.split('-').map(Number)
-                return <option key={m} value={m}>{MONTHS[mo - 1]} {y}</option>
-              })}
-            </select>
-            <select value={selectedPipeline} onChange={e => setSelectedPipeline(e.target.value)}
-              style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text)', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer' }}>
-              <option value="all">Todos</option>
-              <optgroup label="Closers">
-                {data?.pipelines.filter(p => p.type === 'closer').map(p => <option key={p.pipeline} value={p.pipeline}>{p.pipeline} — {p.closer}</option>)}
-              </optgroup>
-              <optgroup label="SDR">
-                {data?.pipelines.filter(p => p.type === 'sdr').map(p => <option key={p.pipeline} value={p.pipeline}>{p.pipeline}</option>)}
-              </optgroup>
-            </select>
-            <button onClick={load} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text2)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13 }}>
-              <RefreshCw size={14} /> Atualizar
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12, color: 'var(--text2)' }}>De</span>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                className="inp" style={{ fontSize: 13, padding: '7px 10px' }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12, color: 'var(--text2)' }}>Até</span>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                className="inp" style={{ fontSize: 13, padding: '7px 10px' }} />
+            </div>
+            <button onClick={load} disabled={isLoading} style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 8,
+              border: 'none', background: 'var(--action)', color: '#E2CFB7',
+              fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', opacity: isLoading ? 0.6 : 1,
+            }}>
+              <RefreshCw size={14} style={{ animation: isLoading ? 'spin 1s linear infinite' : 'none' }} />
+              Buscar
             </button>
           </div>
         </div>
 
-        {/* ── KPIs Globais ──────────────────────────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))', gap: 12, marginBottom: 24 }}>
-          {[
-            { label: 'Total de Negócios', value: totalDeals,    color: 'var(--text)' },
-            { label: 'Cliente Ativo',     value: clienteAtivo,  color: 'var(--green)' },
-            { label: 'Taxa de Conversão', value: `${taxaConv}%`, color: taxaConv >= 30 ? 'var(--green)' : taxaConv >= 15 ? 'var(--orange)' : 'var(--red)' },
-            { label: 'Perdidos/Desqualif',value: perdidos,      color: 'var(--red)' },
-          ].map(k => (
-            <div key={k.label} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
-              <div style={{ fontSize: 28, fontWeight: 800, color: k.color }}>{k.value}</div>
-              <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>{k.label}</div>
-            </div>
-          ))}
-          {pipelines.map((p, i) => {
-            const ativo = p.businesses.filter(b => b.stageName === 'Cliente Ativo' || b.stageName === 'Cliente Ativo (Campanha)').length
-            const movMes = selectedMonth !== 'all' ? filteredBusinesses(p).length : null
-            return (
-              <div key={p.pipeline} style={{ background: 'var(--bg-card)', border: `1px solid ${PIPELINE_COLORS[i]}`, borderRadius: 12, padding: 16 }}>
-                <div style={{ fontSize: 24, fontWeight: 800, color: PIPELINE_COLORS[i] }}>{p.businesses.length}</div>
-                <div style={{ fontSize: 12, color: PIPELINE_COLORS[i], fontWeight: 600, marginTop: 2 }}>{p.pipeline}</div>
-                <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>
-                  {ativo} ativos · {p.closer.split(' ')[0]}
-                  {movMes !== null && <> · <span style={{ color: PIPELINE_COLORS[i] }}>{movMes} no mês</span></>}
-                </div>
-              </div>
-            )
-          })}
-        </div>
+        {error && <div style={{ padding: '14px 20px', borderRadius: 10, background: 'color-mix(in srgb, var(--red) 12%, var(--bg-card2))', border: '1px solid var(--red)', color: 'var(--red)', marginBottom: 20, fontSize: 13 }}>{error}</div>}
 
-        {/* ── Tabs ──────────────────────────────────────────────────────────── */}
-        <div style={{ display: 'flex', gap: 4, background: 'var(--bg-card2)', borderRadius: 10, padding: 4, marginBottom: 20, width: 'fit-content' }}>
-          {([['funil','Funil Closers'], ['sdr','Funil SDR'], ['negocios','Negócios'], ['desempenho','Desempenho']] as const).map(([k, l]) => (
-            <button key={k} onClick={() => setActiveTab(k)} style={{
-              padding: '7px 18px', borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-              background: activeTab === k ? 'var(--action)' : 'transparent',
-              color: activeTab === k ? '#fff' : 'var(--text2)', fontWeight: 600, fontSize: 13,
-            }}>{l}</button>
-          ))}
-        </div>
-
-        {/* ── ABA: FUNIL CLOSERS ────────────────────────────────────────────── */}
-        {activeTab === 'funil' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            {pipelines.map((p, pi) => {
-              const stagesWithCount = p.stages.map(s => ({
-                ...s,
-                movements: stageMovements(p, s.id),
-              }))
-              const maxCount = Math.max(...stagesWithCount.map(s => s.movements), 1)
-              const totalMovements = stagesWithCount.reduce((acc, s) => acc + s.movements, 0)
-
-              return (
-                <div key={p.pipeline} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: PIPELINE_COLORS[pi] }} />
-                    <span style={{ fontWeight: 700, fontSize: 15 }}>{p.pipeline} — {p.closer}</span>
-                    <span style={{ fontSize: 13, color: 'var(--text2)' }}>
-                      {totalMovements} {selectedMonth !== 'all' ? 'movimentos no mês' : 'negócios no total'}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {stagesWithCount.filter(s => s.movements > 0 || selectedMonth === 'all').map((s, si) => {
-                      const pct = maxCount > 0 ? (s.movements / maxCount) * 100 : 0
-                      const isAtivo   = s.name === 'Cliente Ativo' || s.name === 'Cliente Ativo (Campanha)'
-                      const isPerdido = s.name.toLowerCase().includes('perdido') || s.name.toLowerCase().includes('desqualificado')
-                      const barColor  = isAtivo ? 'var(--green)' : isPerdido ? 'var(--red)' : STAGE_COLORS[si % STAGE_COLORS.length]
-                      return (
-                        <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                          <div style={{ width: 160, fontSize: 12, textAlign: 'right', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                            fontWeight: isAtivo ? 700 : 400, color: isAtivo ? 'var(--green)' : isPerdido ? 'var(--red)' : 'var(--text2)' }}>
-                            {s.name}
-                          </div>
-                          <div style={{ flex: 1, height: 28, background: 'var(--bg-card2)', borderRadius: 6, overflow: 'hidden' }}>
-                            <div style={{ height: '100%', width: `${Math.max(pct, s.movements > 0 ? 2 : 0)}%`, background: barColor, borderRadius: 6, transition: 'width .4s', display: 'flex', alignItems: 'center', paddingLeft: 8 }}>
-                              {s.movements > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }}>{s.movements}</span>}
-                            </div>
-                          </div>
-                          <div style={{ width: 32, fontSize: 13, fontWeight: 700, color: barColor, textAlign: 'right' }}>{s.movements}</div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            })}
-
-            {pipelines.length > 1 && (
-              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
-                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 20 }}>Distribuição por Pipeline</div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 40, flexWrap: 'wrap' }}>
-                  <DonutChart size={160} thickness={28} data={pipelines.map((p, i) => ({
-                    label: p.pipeline,
-                    value: selectedMonth !== 'all' ? filteredBusinesses(p).length : p.businesses.length,
-                    color: PIPELINE_COLORS[i],
-                  }))} />
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {pipelines.map((p, i) => (
-                      <div key={p.pipeline} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ width: 12, height: 12, borderRadius: 3, background: PIPELINE_COLORS[i], flexShrink: 0 }} />
-                        <span style={{ fontSize: 13, fontWeight: 600 }}>{p.pipeline}</span>
-                        <span style={{ fontSize: 13, color: 'var(--text2)' }}>
-                          {p.closer} — {selectedMonth !== 'all' ? filteredBusinesses(p).length : p.businesses.length} negócios
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── ABA: SDR ──────────────────────────────────────────────────────── */}
-        {activeTab === 'sdr' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))', gap: 12 }}>
-              {sdrPipelines.map((p, i) => {
-                const biz = filteredBusinesses(p)
-                const qualificados = biz.filter(b => b.stageName === 'Lead Qualificado' || b.stageName === 'Call Agendada').length
-                const perdidos = biz.filter(b => b.stageName.toLowerCase().includes('perdido') || b.stageName.toLowerCase().includes('desqualificado')).length
-                const taxa = biz.length > 0 ? Math.round((qualificados / biz.length) * 100) : 0
-                return (
-                  <div key={p.pipeline} style={{ background: 'var(--bg-card)', border: `1px solid ${SDR_COLORS[i]}`, borderRadius: 12, padding: 16 }}>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: SDR_COLORS[i] }}>
-                      {selectedMonth !== 'all' ? biz.length : p.businesses.length}
-                    </div>
-                    <div style={{ fontSize: 12, color: SDR_COLORS[i], fontWeight: 600, marginTop: 2 }}>{p.pipeline}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>{qualificados} qualif. · {taxa}% taxa · {perdidos} perdidos</div>
-                  </div>
-                )
-              })}
+        {isLoading ? (
+          <div style={{ textAlign: 'center', padding: 80, color: 'var(--text2)', fontSize: 14 }}>Buscando leads nas campanhas e esteiras…</div>
+        ) : (
+          <>
+            {/* KPIs */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 14, marginBottom: 28 }}>
+              <KpiBox label="Total Leads"         value={totals.leadsTotal ?? 0}        color="var(--cyan)"    sub="criados no período"      icon={<Users size={16} color="var(--cyan)" />} />
+              <KpiBox label="Qualificados"        value={totals.qualificadosTotal ?? 0} color="var(--orange)"  sub="R$10–30k ou além"         icon={<Filter size={16} color="var(--orange)" />} />
+              <KpiBox label="Total nas Esteiras"  value={totals.total}                  color="var(--action)"  sub="vindos das 4 campanhas"   icon={<TrendingUp size={16} color="var(--action)" />} />
+              <KpiBox label="Esteira Cadu"        value={totals.cadu}                   color="#07BA1C"        sub="Carlos Eduardo"            icon={<TrendingUp size={16} color="#07BA1C" />} />
+              <KpiBox label="Esteira Geovana"     value={totals.geovana}                color="#5AABB5"        sub="Geovana Paiva"             icon={<TrendingUp size={16} color="#5AABB5" />} />
+              <KpiBox label="Call Agendada"       value={totals.callAgendada}           color="var(--purple)"  sub={`${totals.total > 0 ? Math.round(totals.callAgendada / totals.total * 100) : 0}% dos leads`} icon={<Phone size={16} color="var(--purple)" />} />
             </div>
 
-            {sdrPipelines.map((p, pi) => {
-              const stagesWithCount = p.stages.map(s => ({
-                ...s,
-                movements: stageMovements(p, s.id),
-              }))
-              const maxCount = Math.max(...stagesWithCount.map(s => s.movements), 1)
-              const totalMovements = stagesWithCount.reduce((acc, s) => acc + s.movements, 0)
-
-              return (
-                <div key={p.pipeline} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: SDR_COLORS[pi] }} />
-                    <span style={{ fontWeight: 700, fontSize: 15 }}>{p.pipeline}</span>
-                    <span style={{ fontSize: 13, color: 'var(--text2)' }}>
-                      {totalMovements} {selectedMonth !== 'all' ? 'movimentos no mês' : 'leads no total'}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {stagesWithCount.map((s, si) => {
-                      if (s.movements === 0 && selectedMonth !== 'all') return null
-                      const pct = maxCount > 0 ? (s.movements / maxCount) * 100 : 0
-                      const isQual    = s.name === 'Lead Qualificado' || s.name === 'Call Agendada'
-                      const isPerdido = s.name.toLowerCase().includes('perdido') || s.name.toLowerCase().includes('desqualificado')
-                      const barColor  = isQual ? 'var(--green)' : isPerdido ? 'var(--red)' : SDR_COLORS[pi % SDR_COLORS.length]
-                      return (
-                        <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                          <div style={{ width: 180, fontSize: 12, textAlign: 'right', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                            color: isQual ? 'var(--green)' : isPerdido ? 'var(--red)' : 'var(--text2)', fontWeight: isQual ? 700 : 400 }}>
-                            {s.name}
-                          </div>
-                          <div style={{ flex: 1, height: 28, background: 'var(--bg-card2)', borderRadius: 6, overflow: 'hidden' }}>
-                            <div style={{ height: '100%', width: `${Math.max(pct, s.movements > 0 ? 2 : 0)}%`, background: barColor, borderRadius: 6, transition: 'width .4s', display: 'flex', alignItems: 'center', paddingLeft: 8 }}>
-                              {s.movements > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }}>{s.movements}</span>}
-                            </div>
-                          </div>
-                          <div style={{ width: 32, fontSize: 13, fontWeight: 700, color: barColor, textAlign: 'right' }}>{s.movements}</div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            })}
-
-            {sdrPipelines.length > 1 && (
-              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
-                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 20 }}>Distribuição entre Campanhas</div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 40, flexWrap: 'wrap' }}>
-                  <DonutChart size={160} thickness={28} data={sdrPipelines.map((p, i) => ({
-                    label: p.pipeline,
-                    value: selectedMonth !== 'all' ? filteredBusinesses(p).length : p.businesses.length,
-                    color: SDR_COLORS[i],
-                  }))} />
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {sdrPipelines.map((p, i) => (
-                      <div key={p.pipeline} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ width: 12, height: 12, borderRadius: 3, background: SDR_COLORS[i], flexShrink: 0 }} />
-                        <span style={{ fontSize: 13, fontWeight: 600 }}>{p.pipeline}</span>
-                        <span style={{ fontSize: 13, color: 'var(--text2)' }}>
-                          {selectedMonth !== 'all' ? filteredBusinesses(p).length : p.businesses.length} leads
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── ABA: NEGÓCIOS ─────────────────────────────────────────────────── */}
-        {activeTab === 'negocios' && (
-          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
-            <div style={{ overflowX: 'auto' }}>
+            {/* Stats por campanha */}
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden', marginBottom: 24 }}>
+              <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 14 }}>Por Campanha de Origem</div>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
                   <tr>
-                    {['Pipeline', 'Lead', 'E-mail', 'Etapa', 'Movido em', 'Criado em'].map(h => (
-                      <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em', borderBottom: '1px solid var(--border)', background: 'var(--bg-card2)', whiteSpace: 'nowrap' }}>{h}</th>
+                    {['Campanha','Leads','Qualificados','Entrou na Esteira','Esteira Cadu','Esteira Geovana','Call Agendada','Cliente Ativo','% Call'].map((h, i) => (
+                      <th key={h} style={{ ...thStyle, textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {[...pipelines, ...sdrPipelines].flatMap((p, pi) =>
-                    filteredBusinesses(p)
-                      .sort((a, b) => new Date(b.lastMovedAt ?? b.createdAt).getTime() - new Date(a.lastMovedAt ?? a.createdAt).getTime())
-                      .map((b, i) => {
-                        const isAtivo   = b.stageName === 'Cliente Ativo' || b.stageName === 'Cliente Ativo (Campanha)'
-                        const isPerdido = b.stageName.toLowerCase().includes('perdido') || b.stageName.toLowerCase().includes('desqualificado')
-                        const isSdr     = p.type === 'sdr'
-                        const pColor    = isSdr ? SDR_COLORS[pi % 3] : PIPELINE_COLORS[pi % 3]
-                        const stageColor = isAtivo ? 'var(--green)' : isPerdido ? 'var(--red)' : 'var(--text2)'
-                        return (
-                          <tr key={b.id} style={{ background: i % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-card2)' }}>
-                            <td style={{ padding: '9px 16px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
-                              <span style={{ fontSize: 11, fontWeight: 700, color: pColor, background: `color-mix(in srgb, ${pColor} 12%, var(--bg-card2))`, borderRadius: 6, padding: '2px 8px' }}>{p.pipeline}{isSdr ? ' (SDR)' : ''}</span>
-                            </td>
-                            <td style={{ padding: '9px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.leadName || '—'}</td>
-                            <td style={{ padding: '9px 16px', borderBottom: '1px solid var(--border)', color: 'var(--text2)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.leadEmail || '—'}</td>
-                            <td style={{ padding: '9px 16px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
-                              <span style={{ fontSize: 11, fontWeight: 700, color: stageColor, background: `color-mix(in srgb, ${stageColor === 'var(--text2)' ? '#64748b' : stageColor} 12%, var(--bg-card2))`, borderRadius: 20, padding: '2px 9px' }}>{b.stageName}</span>
-                            </td>
-                            <td style={{ padding: '9px 16px', borderBottom: '1px solid var(--border)', color: 'var(--text2)', whiteSpace: 'nowrap' }}>
-                              {new Date(b.lastMovedAt ?? b.updatedAt).toLocaleDateString('pt-BR')}
-                            </td>
-                            <td style={{ padding: '9px 16px', borderBottom: '1px solid var(--border)', color: 'var(--text2)', whiteSpace: 'nowrap' }}>
-                              {new Date(b.createdAt).toLocaleDateString('pt-BR')}
-                            </td>
-                          </tr>
-                        )
-                      })
-                  )}
+                  {Object.entries(stats).sort(([, a], [, b]) => (b.leads + b.qualificados) - (a.leads + a.qualificados)).map(([camp, s]) => (
+                    <tr key={camp}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-card2)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                      <td style={tdStyle}><span style={{ fontWeight: 600, color: CAMPANHA_COLORS[camp] ?? 'var(--action)' }}>{camp}</span></td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: 'var(--cyan)' }}>{s.leads ?? 0}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: 'var(--orange)' }}>{s.qualificados ?? 0}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{s.cadu + s.geovana}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', color: '#07BA1C' }}>{s.cadu}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', color: '#5AABB5' }}>{s.geovana}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--purple)', fontWeight: 700 }}>{s.callAgendada}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', color: (s.clienteAtivo ?? 0) > 0 ? 'var(--green)' : 'var(--text2)', fontWeight: (s.clienteAtivo ?? 0) > 0 ? 700 : 400 }}>{s.clienteAtivo ?? 0}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: (s.cadu + s.geovana) > 0 && s.callAgendada / (s.cadu + s.geovana) >= 0.5 ? 'var(--green)' : s.callAgendada > 0 ? 'var(--orange)' : 'var(--text2)' }}>
+                        {(s.cadu + s.geovana) > 0 ? `${Math.round(s.callAgendada / (s.cadu + s.geovana) * 100)}%` : '—'}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
-          </div>
-        )}
 
-        {/* ── ABA: DESEMPENHO ───────────────────────────────────────────────── */}
-        {activeTab === 'desempenho' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 20 }}>Taxa de Conversão por Closer</div>
-              <BarChartH data={pipelines.map((p, i) => {
-                const biz   = p.businesses
-                const ativo = biz.filter(b => b.stageName === 'Cliente Ativo' || b.stageName === 'Cliente Ativo (Campanha)').length
-                const taxa  = biz.length > 0 ? Math.round((ativo / biz.length) * 100) : 0
-                return { label: `${p.pipeline} (${p.closer.split(' ')[0]})`, value: taxa }
-              })} valueKey="value" labelKey="label" />
+            {/* Filtros */}
+            <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="Buscar lead…" className="inp"
+                style={{ fontSize: 13, padding: '7px 12px', flex: 1, minWidth: 180 }} />
+              <select value={filterEst}  onChange={e => setFilterEst(e.target.value)}  style={selStyle}>
+                <option value="all">Todas as Esteiras</option>
+                <option value="Esteira Cadu">Esteira Cadu</option>
+                <option value="Esteira Geovana">Esteira Geovana</option>
+              </select>
+              <select value={filterCamp} onChange={e => setFilterCamp(e.target.value)} style={selStyle}>
+                <option value="all">Todas as Campanhas</option>
+                <option value="Campanha Low Ticket">Low Ticket</option>
+                <option value="Campanha Meta - Ads">Meta - Ads</option>
+                <option value="Formulário Dist. Leads">Formulário Leads</option>
+                <option value="Campanha Juros">Campanha Juros</option>
+              </select>
+              <select value={filterCall} onChange={e => setFilterCall(e.target.value)} style={selStyle}>
+                <option value="all">Todos</option>
+                <option value="sim">Com Call Agendada</option>
+                <option value="nao">Sem Call Agendada</option>
+              </select>
+              <span style={{ fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' }}>{filtered.length}/{leads.length} leads</span>
             </div>
 
-            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 20 }}>Distribuição por Etapa (combinado)</div>
-              {(() => {
-                const stageMap = new Map<string, number>()
-                pipelines.forEach(p => p.businesses.forEach(b => {
-                  stageMap.set(b.stageName, (stageMap.get(b.stageName) ?? 0) + 1)
-                }))
-                const sorted = [...stageMap.entries()].sort((a, b) => b[1] - a[1])
-                const max = sorted[0]?.[1] ?? 1
-                return (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {sorted.map(([name, count], i) => {
-                      const isAtivo   = name === 'Cliente Ativo' || name === 'Cliente Ativo (Campanha)'
-                      const isPerdido = name.toLowerCase().includes('perdido') || name.toLowerCase().includes('desqualificado')
-                      const color     = isAtivo ? 'var(--green)' : isPerdido ? 'var(--red)' : STAGE_COLORS[i % STAGE_COLORS.length]
-                      return (
-                        <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                          <div style={{ width: 150, fontSize: 12, color: 'var(--text2)', textAlign: 'right', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
-                          <div style={{ flex: 1, height: 24, background: 'var(--bg-card2)', borderRadius: 6, overflow: 'hidden' }}>
-                            <div style={{ height: '100%', width: `${(count / max) * 100}%`, background: color, borderRadius: 6 }} />
-                          </div>
-                          <div style={{ width: 28, fontSize: 13, fontWeight: 700, color, textAlign: 'right' }}>{count}</div>
+            {/* Tabela de leads */}
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    {['Lead','Email','Esteira','SDR','Stage Atual','Origem','Call Ag.','Closer','Movido em'].map(h => (
+                      <th key={h} style={thStyle}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.length === 0 && (
+                    <tr><td colSpan={8} style={{ ...tdStyle, textAlign: 'center', color: 'var(--text2)', padding: 40 }}>Nenhum lead encontrado.</td></tr>
+                  )}
+                  {filtered.map(l => (
+                    <tr key={l.leadId + l.esteira}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-card2)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                      <td style={{ ...tdStyle, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <Avatar name={l.leadName} size={26} />
+                          {l.leadName}
                         </div>
-                      )
-                    })}
-                  </div>
-                )
-              })()}
-            </div>
-
-            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 20 }}>Movimentações por Mês</div>
-              {(() => {
-                const monthMap = new Map<string, number>()
-                pipelines.forEach(p => p.businesses.forEach(b => {
-                  const m = (b.lastMovedAt ?? b.createdAt)?.slice(0, 7) ?? ''
-                  if (m) monthMap.set(m, (monthMap.get(m) ?? 0) + 1)
-                }))
-                const sorted = [...monthMap.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-                const max = Math.max(...sorted.map(s => s[1]), 1)
-                return (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {sorted.map(([month, count]) => {
-                      const [y, mo] = month.split('-').map(Number)
-                      return (
-                        <div key={month} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                          <div style={{ width: 110, fontSize: 12, color: 'var(--text2)', textAlign: 'right', flexShrink: 0 }}>{MONTHS[mo - 1]} {y}</div>
-                          <div style={{ flex: 1, height: 24, background: 'var(--bg-card2)', borderRadius: 6, overflow: 'hidden' }}>
-                            <div style={{ height: '100%', width: `${(count / max) * 100}%`, background: 'var(--action)', borderRadius: 6, display: 'flex', alignItems: 'center', paddingLeft: 8 }}>
-                              {count > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: '#fff' }}>{count}</span>}
-                            </div>
-                          </div>
-                          <div style={{ width: 28, fontSize: 13, fontWeight: 700, color: 'var(--action)', textAlign: 'right' }}>{count}</div>
+                      </td>
+                      <td style={{ ...tdStyle, color: 'var(--text2)', fontSize: 12 }}>{l.leadEmail || '—'}</td>
+                      <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
+                        <span style={{ fontWeight: 700, color: ESTEIRA_COLORS[l.esteira] ?? 'var(--text2)' }}>
+                          {l.esteira.replace('Esteira ', '')}
+                        </span>
+                      </td>
+                      <td style={{ ...tdStyle, fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' }}>{l.sdr.split(' ')[0]}</td>
+                      <td style={{ ...tdStyle, fontSize: 12 }}>{l.stage}</td>
+                      <td style={tdStyle}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          {l.origens.map(o => (
+                            <span key={o} style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, background: `color-mix(in srgb, ${CAMPANHA_COLORS[o] ?? 'var(--text2)'} 15%, var(--bg-card2))`, color: CAMPANHA_COLORS[o] ?? 'var(--text2)', whiteSpace: 'nowrap', display: 'inline-block' }}>
+                              {o.replace('Campanha ', '').replace('Formulário Dist. Leads', 'Form. Leads')}
+                            </span>
+                          ))}
                         </div>
-                      )
-                    })}
-                  </div>
-                )
-              })()}
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: 'center' }}>
+                        {l.callAgendada
+                          ? <span style={{ color: 'var(--green)', fontWeight: 700, fontSize: 16 }}>✓</span>
+                          : <span style={{ color: 'var(--text2)' }}>—</span>}
+                      </td>
+                      <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
+                        {l.closer ? (
+                          <div>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--action)' }}>{l.closer.split(' ')[0]}</div>
+                            <div style={{ fontSize: 10, color: l.closerTipo === 'Cliente Ativo' ? 'var(--green)' : l.closerTipo === 'Call Realizada' ? 'var(--green)' : 'var(--cyan)', fontWeight: 600 }}>{l.closerTipo}</div>
+                          </div>
+                        ) : <span style={{ color: 'var(--text2)', fontSize: 12 }}>—</span>}
+                      </td>
+                      <td style={{ ...tdStyle, fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' }}>{fmt(l.lastMovedAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </div>
+          </>
         )}
-
+        <div style={{ height: 32 }} />
       </div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </>
   )
 }

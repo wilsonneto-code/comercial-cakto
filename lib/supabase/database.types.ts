@@ -13,13 +13,14 @@ export type UserRole =
   | 'Gerente de Contas'
   | 'Closer'
   | 'SDR'
+  | 'Social Selling'
   | 'Colaborador'
 
-export type ActivationChannel = 'Inbound' | 'Outbound' | 'Indicação'
+export type ActivationChannel = 'Inbound' | 'Outbound' | 'Indicação' | 'Churn' | 'Prevenção de Churn'
 export type FormType           = 'Cadastro' | 'Pesquisa' | 'Indicação' | 'Qualificação' | 'Premiação' | 'Contrato'
 export type FormStatus         = 'Publicado' | 'Arquivado' | 'Rascunho'
 export type PaymentStatus      = 'Pendente' | 'Pago' | 'Cancelado'
-export type CallStatus         = 'Agendada' | 'Realizada' | 'Cancelada' | 'No-show'
+export type CallStatus         = 'Agendada' | 'Em Atendimento' | 'Realizada' | 'Cancelada' | 'No-show'
 export type AwardStatus        = 'Pendente' | 'Em Trânsito' | 'Enviado' | 'Entregue' | 'Cancelado'
 
 export interface Database {
@@ -177,17 +178,32 @@ export interface Database {
       calls: {
         Row: {
           id: string; title: string; date: string; time: string
-          responsible: string; status: CallStatus; notes: string
+          end_time: string | null; responsible: string; status: CallStatus; notes: string
+          client_email: string | null; sdr_nome: string | null; campanha: string
+          google_event_id: string | null; meet_link: string | null
+          ativado: boolean | null; motivo_nao_ativacao: string | null
+          motivo_cancelamento: string | null; motivo_noshow: string | null
+          image_urls: string[] | null
           created_at: string; updated_at: string
         }
         Insert: {
           id?: string; title: string; date: string; time: string
-          responsible: string; status?: CallStatus; notes?: string
+          end_time?: string | null; responsible: string; status?: CallStatus; notes?: string
+          client_email?: string | null; sdr_nome?: string | null; campanha?: string
+          google_event_id?: string | null; meet_link?: string | null
+          ativado?: boolean | null; motivo_nao_ativacao?: string | null
+          motivo_cancelamento?: string | null; motivo_noshow?: string | null
+          image_urls?: string[] | null
           created_at?: string; updated_at?: string
         }
         Update: {
           id?: string; title?: string; date?: string; time?: string
-          responsible?: string; status?: CallStatus; notes?: string; updated_at?: string
+          end_time?: string | null; responsible?: string; status?: CallStatus; notes?: string
+          client_email?: string | null; sdr_nome?: string | null; campanha?: string
+          google_event_id?: string | null; meet_link?: string | null
+          ativado?: boolean | null; motivo_nao_ativacao?: string | null
+          motivo_cancelamento?: string | null; motivo_noshow?: string | null
+          image_urls?: string[] | null; updated_at?: string
         }
         Relationships: [
           { foreignKeyName: 'calls_responsible_fkey'; columns: ['responsible']; isOneToOne: false; referencedRelation: 'users'; referencedColumns: ['id'] }

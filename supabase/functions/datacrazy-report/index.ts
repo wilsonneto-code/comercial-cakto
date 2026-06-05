@@ -87,6 +87,277 @@ serve(async (req) => {
 
     const h = { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
 
+    // ── Modo: Relatório de Leads das 4 Campanhas → Esteiras → Call Agendada ──
+    const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {}
+    if (body.leads_report) {
+      const SOURCE_IDS = new Set([
+        '03421a59-a526-43e1-a429-05943887ab14', // Campanha Low Ticket
+        'd23a5d31-84bb-4794-9e22-d7e1b9458c84', // Campanha Meta - Formulário Nativo
+        '172facdd-d902-463f-80e4-53ef1c3b965b', // Formulário Distr. Leads
+        '61769c50-9f92-4946-917f-1f2075171017', // Campanha Juros
+      ])
+      const SOURCE_NAMES: Record<string, string> = {
+        '03421a59-a526-43e1-a429-05943887ab14': 'Campanha Low Ticket',
+        'd23a5d31-84bb-4794-9e22-d7e1b9458c84': 'Campanha Meta - Ads',
+        '172facdd-d902-463f-80e4-53ef1c3b965b': 'Formulário Dist. Leads',
+        '61769c50-9f92-4946-917f-1f2075171017': 'Campanha Juros',
+      }
+      const ESTEIRA_IDS = new Set([
+        '79319246-8852-430c-8b62-b5c10a9dd6f0', // Esteira Cadu
+        '201d3917-dbd7-4bb5-bb27-a703f9a964a0', // Esteira Geovana
+      ])
+      const ESTEIRA_NAMES: Record<string, { name: string; sdr: string }> = {
+        '79319246-8852-430c-8b62-b5c10a9dd6f0': { name: 'Esteira Cadu', sdr: 'Carlos Eduardo' },
+        '201d3917-dbd7-4bb5-bb27-a703f9a964a0': { name: 'Esteira Geovana', sdr: 'Geovana Paiva' },
+      }
+      // Stages relevantes dentro das próprias campanhas de origem para mostrar na tabela
+      // "callAgendada" só será true se o lead também aparecer nos Closers
+      const SOURCE_CALL_STAGES: Record<string, { pipeline: string; tipo: string }> = {
+        'fedbdf5e-99c9-4259-a031-4a90074d9a91': { pipeline: 'Campanha Low Ticket',    tipo: 'Call Agendada'   },
+        '0dee0b06-7eb0-4e87-9b7c-cc7bdc1536b9': { pipeline: 'Campanha Juros',         tipo: 'Call Agendada'   },
+        '09c9e5c8-b2ae-456b-9cf3-4f74765213ae': { pipeline: 'Formulário Dist. Leads', tipo: 'Leads Atendidos' },
+      }
+      // Stages relevantes nos 3 pipelines de Closer (Call Agendada + Cliente Ativo)
+      const CLOSER_STAGE_IDS: Record<string, { closer: string; tipo: string }> = {
+        'dcf4a28b-c8d8-4aca-ad8b-8380abb1223e': { closer: 'Victor Vieira', tipo: 'Call Agendada'  },
+        '8584ffbb-4e04-4221-9523-e2e5690b6d91': { closer: 'Victor Vieira', tipo: 'Call Realizada' },
+        'f5faf1b5-0f76-40b2-8cb3-d8c2c127595f': { closer: 'Victor Vieira', tipo: 'Cliente Ativo'  },
+        '4563c2d4-541b-4b5a-91b7-e55a1acff731': { closer: 'Wilson Neto',   tipo: 'Call Agendada'  },
+        'bebbd1dc-faaa-4ab0-9689-5aa9ccb974d7': { closer: 'Wilson Neto',   tipo: 'Call Realizada' },
+        '9b8e192e-8ae9-4b08-b89f-44592c43b1bd': { closer: 'Wilson Neto',   tipo: 'Cliente Ativo'  },
+        '14854585-59d9-450e-aea6-3bcef31baf4f': { closer: 'Isaac',         tipo: 'Call Agendada'  },
+        '834e3653-22ad-4b19-9687-70ba1155c4a0': { closer: 'Isaac',         tipo: 'Call Realizada' },
+        'f7f0a07f-c08b-4ee0-a731-4e76f463b52d': { closer: 'Isaac',         tipo: 'Cliente Ativo'  },
+        'a472fe43-60ea-4af8-b6c0-436359283d78': { closer: 'Isaac',         tipo: 'Cliente Ativo'  },
+      }
+      // Filtro de data (opcional)
+      const startDate = body.startDate ? new Date(body.startDate) : null
+      const endDate   = body.endDate   ? new Date(body.endDate + 'T23:59:59') : null
+
+      // Nome da coluna de qualificação em cada pipeline de campanha
+      const QUALIFIED_STAGE_NAME = 'Entre R$ 10 Mil e R$ 30 Mil por mês'
+
+      // Rastreia leads únicos: total criados + qualificados por campanha
+      const sourceLeadSets: Record<string, { leads: Set<string>; qualificados: Set<string> }> = {}
+      for (const name of Object.values(SOURCE_NAMES)) {
+        sourceLeadSets[name] = { leads: new Set(), qualificados: new Set() }
+      }
+
+      // Busca a ordenação de stages de cada pipeline fonte para saber quais IDs são >= "qualificado"
+      // Leads em "Entre R$10-30k" OU qualquer stage posterior = qualificado
+      const qualifiedStageIds: Record<string, Set<string>> = {}
+      for (const [pid, pname] of Object.entries(SOURCE_NAMES)) {
+        qualifiedStageIds[pname] = new Set()
+        try {
+          const stagesRes  = await fetch(`${BASE}/pipelines/${pid}/stages`, { headers: h })
+          const stagesData = await stagesRes.json()
+          const stages: any[] = (stagesData.data ?? stagesData ?? [])
+            .sort((a: any, b: any) => (a.index ?? 0) - (b.index ?? 0))
+          const qualIdx = stages.findIndex((s: any) => s.name === QUALIFIED_STAGE_NAME)
+          if (qualIdx >= 0) {
+            for (const s of stages.slice(qualIdx)) qualifiedStageIds[pname].add(s.id)
+          }
+          console.log(`[leads_report] ${pname} stages=${stages.length} qualIdx=${qualIdx}`)
+        } catch (e) {
+          console.warn(`[leads_report] stages fetch failed for ${pname}:`, e)
+        }
+      }
+
+      // Busca TODOS os businesses de uma vez (API só funciona via /businesses global)
+      const { rows: allBiz } = await fetchAllPages(`${BASE}/businesses`, h)
+      console.log(`[leads_report] total businesses fetched: ${allBiz.length}`)
+
+      // Indexa por leadId → info nos pipelines relevantes
+      const leadInSource:  Record<string, string[]>  = {} // leadId → [pipeline names]
+      const leadInEsteira: Record<string, { name: string; sdr: string; stage: string; stageId: string; lastMovedAt: string; leadName: string; leadEmail: string; phone: string }> = {}
+      const leadInCloserCall: Record<string, string> = {} // leadId → closer name
+
+      for (const b of allBiz) {
+        const lid = b.leadId ?? b.lead?.id
+        if (!lid) continue
+        const pid = b.stage?.pipeline?.id ?? ''
+        const sid = b.stage?.id ?? ''
+
+        if (SOURCE_IDS.has(pid)) {
+          if (!leadInSource[lid]) leadInSource[lid] = []
+          const pname = SOURCE_NAMES[pid]
+          if (pname && !leadInSource[lid].includes(pname)) leadInSource[lid].push(pname)
+
+          // Total Leads = todos criados no período (via API automation)
+          // Qualificados = desses mesmos leads, os que estão em "Entre R$10-30k" ou etapa posterior
+          if (pname && sourceLeadSets[pname]) {
+            const createdAt = b.createdAt ?? ''
+            let inRange = true
+            if (createdAt && startDate && new Date(createdAt) < startDate) inRange = false
+            if (createdAt && endDate   && new Date(createdAt) > endDate)   inRange = false
+            if (inRange) {
+              sourceLeadSets[pname].leads.add(lid)
+              if (qualifiedStageIds[pname]?.has(sid)) {
+                sourceLeadSets[pname].qualificados.add(lid)
+              }
+            }
+          }
+        }
+
+        if (ESTEIRA_IDS.has(pid)) {
+          const info = ESTEIRA_NAMES[pid]
+          if (info) {
+            const movedAt = b.lastMovedAt ?? b.updatedAt ?? b.createdAt ?? ''
+            // Aplica filtro de data se fornecido
+            if (movedAt && startDate) {
+              const d = new Date(movedAt)
+              if (d < startDate) continue
+            }
+            if (movedAt && endDate) {
+              const d = new Date(movedAt)
+              if (d > endDate) continue
+            }
+            leadInEsteira[lid] = {
+              name: info.name,
+              sdr: info.sdr,
+              stage: b.stage?.name ?? '—',
+              stageId: sid,
+              lastMovedAt: movedAt,
+              leadName:  b.lead?.name  ?? '—',
+              leadEmail: b.lead?.email ?? '',
+              phone:     b.lead?.phone ?? '',
+            }
+          }
+        }
+
+        if (CLOSER_STAGE_IDS[sid]) {
+          const info = CLOSER_STAGE_IDS[sid]
+          const PRIO: Record<string, number> = { 'Cliente Ativo': 3, 'Call Realizada': 2, 'Call Agendada': 1 }
+          const existing = leadInCloserCall[lid]
+          if (!existing || (PRIO[info.tipo] ?? 0) > (PRIO[existing.split(' | ')[1]] ?? 0)) {
+            leadInCloserCall[lid] = `${info.closer} | ${info.tipo}`
+          }
+        }
+
+        // Registra leads em "Call Agendada" dentro das próprias campanhas
+        if (SOURCE_CALL_STAGES[sid]) {
+          const info = SOURCE_CALL_STAGES[sid]
+          const movedAt = b.lastMovedAt ?? b.updatedAt ?? b.createdAt ?? ''
+          if (movedAt && startDate && new Date(movedAt) < startDate) continue
+          if (movedAt && endDate   && new Date(movedAt) > endDate)   continue
+          if (!leadInEsteira[lid]) {
+            // Só adiciona se ainda não está catalogado via esteira
+            leadInEsteira[lid] = {
+              name: `Campanha (${info.tipo})`,
+              sdr: 'SDR',
+              stage: b.stage?.name ?? info.tipo,
+              stageId: sid,
+              lastMovedAt: movedAt,
+              leadName:  b.lead?.name  ?? '—',
+              leadEmail: b.lead?.email ?? '',
+              phone:     b.lead?.phone ?? '',
+            }
+          }
+        }
+      }
+
+      // Cruza: lead que veio de fonte + está na esteira ou em Call Agendada da própria campanha
+      const resultLeads: Array<{
+        leadId: string; leadName: string; leadEmail: string; phone: string
+        esteira: string; sdr: string; stage: string
+        origens: string[]; callAgendada: boolean; closer: string
+        lastMovedAt: string
+      }> = []
+
+      // 1. Leads que passaram pelas Esteiras ou SOURCE_CALL_STAGES
+      const addedLeads = new Set<string>()
+      for (const [lid, esteiraInfo] of Object.entries(leadInEsteira)) {
+        const origens = leadInSource[lid]
+        if (!origens || origens.length === 0) continue
+        const closerRaw = leadInCloserCall[lid] ?? ''
+        const [closerName, closerTipo] = closerRaw ? closerRaw.split(' | ') : ['', '']
+        const isDirectSourceCall = esteiraInfo.name.startsWith('Campanha (Call Agendada')
+        const callAgendada = !!closerRaw || isDirectSourceCall
+        addedLeads.add(lid)
+        resultLeads.push({
+          leadId:      lid,
+          leadName:    esteiraInfo.leadName,
+          leadEmail:   esteiraInfo.leadEmail,
+          phone:       esteiraInfo.phone,
+          esteira:     esteiraInfo.name,
+          sdr:         esteiraInfo.sdr,
+          stage:       esteiraInfo.stage,
+          origens,
+          callAgendada,
+          closer:      closerName,
+          closerTipo:  closerTipo ?? '',
+          lastMovedAt: esteiraInfo.lastMovedAt,
+        })
+      }
+
+      // 2. Leads que foram DIRETO da campanha para os Closers (sem passar pelas Esteiras)
+      //    Rastreados em leadInCloserCall mas não em leadInEsteira
+      for (const [lid, closerRaw] of Object.entries(leadInCloserCall)) {
+        if (addedLeads.has(lid)) continue // já adicionado
+        const origens = leadInSource[lid]
+        if (!origens || origens.length === 0) continue
+        const [closerName, closerTipo] = closerRaw.split(' | ')
+        // Busca dados do lead no allBiz (primeiro negócio encontrado nas fontes)
+        const bizData = allBiz.find((b: any) => (b.leadId ?? b.lead?.id) === lid && SOURCE_IDS.has(b.stage?.pipeline?.id ?? ''))
+        resultLeads.push({
+          leadId:      lid,
+          leadName:    bizData?.lead?.name  ?? '—',
+          leadEmail:   bizData?.lead?.email ?? '',
+          phone:       bizData?.lead?.phone ?? '',
+          esteira:     'Direto para Closer',
+          sdr:         '—',
+          stage:       bizData?.stage?.name ?? '—',
+          origens,
+          callAgendada: true,
+          closer:      closerName,
+          closerTipo:  closerTipo ?? '',
+          lastMovedAt: bizData?.lastMovedAt ?? '',
+        })
+      }
+
+      // Estatísticas por campanha
+      // Pré-inicializa todas as 4 campanhas para garantir que apareçam na tabela
+      const stats: Record<string, { total: number; cadu: number; geovana: number; callAgendada: number; clienteAtivo: number; leads: number; qualificados: number }> = {}
+      for (const name of Object.values(SOURCE_NAMES)) {
+        stats[name] = { total: 0, cadu: 0, geovana: 0, callAgendada: 0, clienteAtivo: 0, leads: 0, qualificados: 0 }
+      }
+      for (const l of resultLeads) {
+        for (const o of l.origens) {
+          if (!stats[o]) stats[o] = { total: 0, cadu: 0, geovana: 0, callAgendada: 0, clienteAtivo: 0, leads: 0, qualificados: 0 }
+          stats[o].total++
+          if (l.esteira === 'Esteira Cadu') stats[o].cadu++
+          else if (l.esteira === 'Esteira Geovana') stats[o].geovana++
+          if (l.callAgendada) stats[o].callAgendada++
+          if ((l as any).closerTipo === 'Cliente Ativo') stats[o].clienteAtivo++
+        }
+      }
+      // Injeta contagens de Leads e Qualificados por campanha
+      for (const [campName, sets] of Object.entries(sourceLeadSets)) {
+        if (stats[campName]) {
+          stats[campName].leads        = sets.leads.size
+          stats[campName].qualificados = sets.qualificados.size
+        }
+      }
+
+      const leadsTotal        = Object.values(sourceLeadSets).reduce((a, s) => a + s.leads.size, 0)
+      const qualificadosTotal = Object.values(sourceLeadSets).reduce((a, s) => a + s.qualificados.size, 0)
+
+      return json({
+        leads: resultLeads,
+        stats,
+        totals: {
+          total: resultLeads.length,
+          cadu: resultLeads.filter(l => l.esteira === 'Esteira Cadu').length,
+          geovana: resultLeads.filter(l => l.esteira === 'Esteira Geovana').length,
+          callAgendada: resultLeads.filter(l => l.callAgendada).length,
+          clienteAtivo: resultLeads.filter(l => (l as any).closerTipo === 'Cliente Ativo').length,
+          leadsTotal,
+          qualificadosTotal,
+        },
+        fetchedAt: new Date().toISOString(),
+      })
+    }
+
     // ── Modo diagnóstico: descobre quantos negócios a API retorna com cada parâmetro ──
     if (diagnose) {
       const variants = [

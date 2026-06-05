@@ -14,15 +14,17 @@ import { Field, Sel } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { supabase } from '@/lib/supabase/client';
 import type { CallStatus } from '@/lib/supabase/database.types';
+import { isSDRRole } from '@/lib/utils';
 
 const DAYS   = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
 const CALL_STATUS_COLORS: Record<string, string> = {
-  'Agendada':  'var(--action)',
-  'Realizada': 'var(--green)',
-  'Cancelada': 'var(--red)',
-  'No-show':   'var(--orange)',
+  'Agendada':        'var(--action)',
+  'Em Atendimento':  'var(--cyan)',
+  'Realizada':       'var(--green)',
+  'Cancelada':       'var(--red)',
+  'No-show':         'var(--orange)',
 };
 
 // Google Calendar colorId palette — mesma lógica na edge function
@@ -42,7 +44,7 @@ function closerColor(name: string): string {
 const DAYS_FULL = ['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];
 const MONTHS_PT = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 
-type DbUser  = { id: string; name: string; role: string; email: string }
+type DbUser  = { id: string; name: string; role: string; email: string; extra_roles: string[] | null }
 type CallItem = {
   id:                    string
   title:                 string
@@ -54,13 +56,24 @@ type CallItem = {
   status:                string
   notes:                 string
   clientEmail:           string
+  campanha:              string
   google_event_id:       string
   meet_link:             string
   ativado:               boolean | null
   motivo_nao_ativacao:   string | null
+  motivo_cancelamento:   string | null
+  motivo_noshow:         string | null
   sdrNome:               string
   image_urls:            string[]
 }
+
+const CAMPANHAS = [
+  'Campanha Iphone Antiga',
+  'Campanha Juros',
+  'Campanha Low Ticket',
+  'Campanha Meta - Formulário Nativo',
+  'Campanha Formulário Distr. Leads',
+]
 
 function formatInviteText(call: CallItem): string {
   const d       = new Date(call.date + 'T12:00:00');
@@ -77,7 +90,7 @@ function formatInviteText(call: CallItem): string {
 
 type HistoryCall = CallItem & { period: string };
 
-const EMPTY_FORM = { title: '', date: '', time: '', endTime: '', responsibleId: '', status: 'Agendada', notes: '', clientEmail: '', sdrNome: '' };
+const EMPTY_FORM = { title: '', date: '', time: '', endTime: '', responsibleId: '', status: 'Agendada', notes: '', clientEmail: '', sdrNome: '', campanha: '' };
 
 export default function AgendaPage() {
   const { user, loading } = useAuth();
@@ -113,6 +126,11 @@ function AgendaContent() {
   const [closerModal, setCloserModal] = useState<{ id: string; name: string } | null>(null);
   const [motivoInput,  setMotivoInput]  = useState('');
   const [motivoImages, setMotivoImages] = useState<File[]>([]);
+  const [pendingStatus, setPendingStatus] = useState<'Cancelada' | 'No-show' | null>(null);
+  const [motivoStatus,  setMotivoStatus]  = useState('');
+  // Filtros da tabela de reuniões
+  const [tableFilterResp, setTableFilterResp] = useState('');
+  const [tableFilterSdr,  setTableFilterSdr]  = useState('');
 
   const [history, setHistory]               = useState<HistoryCall[]>([]);
   const [expandedPeriods, setExpandedPeriods] = useState<Set<string>>(new Set());
@@ -123,9 +141,9 @@ function AgendaContent() {
       setIsLoading(true);
       const [{ data: dbCalls, error: ce }, { data: dbUsers, error: ue }, { data: dbHistory }] = await Promise.all([
         supabase.from('calls')
-          .select('id,title,date,time,end_time,responsible,status,notes,client_email,google_event_id,meet_link,ativado,motivo_nao_ativacao,sdr_nome,image_urls')
+          .select('id,title,date,time,end_time,responsible,status,notes,client_email,google_event_id,meet_link,ativado,motivo_nao_ativacao,motivo_cancelamento,motivo_noshow,sdr_nome,image_urls')
           .order('date').order('time'),
-        supabase.from('users').select('id,name,role,email').order('name'),
+        supabase.from('users').select('id,name,role,email,extra_roles').order('name'),
         supabase.from('calls_history')
           .select('id,title,date,time,end_time,responsible,status,notes,client_email,google_event_id,meet_link,period')
           .order('period', { ascending: false }).order('date').order('time'),
@@ -148,9 +166,12 @@ function AgendaContent() {
         clientEmail:     c.client_email ?? '',
         google_event_id:     c.google_event_id ?? '',
         meet_link:           c.meet_link ?? '',
-        ativado:             c.ativado ?? null,
-        motivo_nao_ativacao: c.motivo_nao_ativacao ?? null,
-        sdrNome:             c.sdr_nome ?? '',
+        ativado:              c.ativado ?? null,
+        motivo_nao_ativacao:  c.motivo_nao_ativacao ?? null,
+        motivo_cancelamento:  c.motivo_cancelamento ?? null,
+        motivo_noshow:        c.motivo_noshow ?? null,
+        sdrNome:              c.sdr_nome || 'Carlos Eduardo',
+        campanha:             c.campanha ?? '',
         image_urls:          (c.image_urls as string[]) ?? [],
         ...(period !== undefined ? { period } : {}),
       });
@@ -277,7 +298,7 @@ function AgendaContent() {
 
   function openEdit(call: CallItem) {
     setEditCall(call);
-    setForm({ title: call.title, date: call.date, time: call.time, endTime: call.endTime || '', responsibleId: call.responsibleId, status: call.status, notes: call.notes, clientEmail: call.clientEmail || '', sdrNome: call.sdrNome || '' });
+    setForm({ title: call.title, date: call.date, time: call.time, endTime: call.endTime || '', responsibleId: call.responsibleId, status: call.status, notes: call.notes, clientEmail: call.clientEmail || '', sdrNome: call.sdrNome || '', campanha: call.campanha || '' });
     setSheetCall(null);
     setModal(true);
   }
@@ -302,6 +323,7 @@ function AgendaContent() {
         notes:        form.notes,
         client_email: form.clientEmail,
         sdr_nome:     form.sdrNome || null,
+        campanha:     form.campanha || '',
       };
       const { error } = await supabase.from('calls').update(patch).eq('id', editCall.id);
       setIsSaving(false);
@@ -336,6 +358,7 @@ function AgendaContent() {
         notes:        form.notes,
         client_email: form.clientEmail,
         sdr_nome:     form.sdrNome || null,
+        campanha:     form.campanha || '',
       };
       const { data, error } = await supabase.from('calls').insert(row).select().single();
       setIsSaving(false);
@@ -344,6 +367,7 @@ function AgendaContent() {
         id: (data as any).id, title: form.title, date: form.date, time: form.time, endTime: form.endTime,
         responsibleId: form.responsibleId, responsible: responsibleName,
         status: form.status, notes: form.notes, clientEmail: form.clientEmail,
+        campanha: form.campanha || '',
         google_event_id: '', meet_link: '',
       };
       setCalls(p => [newCall, ...p]);
@@ -388,12 +412,17 @@ function AgendaContent() {
     }
   }
 
-  async function updateStatus(id: string, status: string) {
-    const { error } = await supabase.from('calls').update({ status: status as CallStatus }).eq('id', id);
+  async function updateStatus(id: string, status: string, motivo?: string) {
+    const patch: Record<string, unknown> = { status: status as CallStatus }
+    if (status === 'Cancelada' && motivo !== undefined) patch.motivo_cancelamento = motivo || null
+    if (status === 'No-show'   && motivo !== undefined) patch.motivo_noshow       = motivo || null
+    const { error } = await supabase.from('calls').update(patch).eq('id', id);
     if (error) { toast(error.message, 'error'); return; }
-    setCalls(p => p.map(c => c.id === id ? { ...c, status } : c));
-    setSheetCall(prev => prev?.id === id ? { ...prev, status } : prev);
+    setCalls(p => p.map(c => c.id === id ? { ...c, status, ...patch } : c));
+    setSheetCall(prev => prev?.id === id ? { ...prev, status, ...patch } as CallItem : prev);
     toast(`Status: ${status}`, 'success');
+    setPendingStatus(null);
+    setMotivoStatus('');
   }
 
   async function saveAtivacao(id: string, ativado: boolean, motivo?: string, images?: File[]) {
@@ -429,7 +458,7 @@ function AgendaContent() {
   }
 
   const upcoming = filteredCalls
-    .filter(c => c.status === 'Agendada')
+    .filter(c => c.status === 'Agendada' || c.status === 'Em Atendimento')
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, 8);
 
@@ -465,10 +494,10 @@ function AgendaContent() {
         {/* ── KPIs ───────────────────────────────────────────────────────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))', gap: 12, marginBottom: 20 }}>
           {([
-            { label: 'Agendadas',  value: calls.filter(c => c.status === 'Agendada').length,  color: 'var(--action)' },
+            { label: `Agendadas (${String(month + 1).padStart(2,'0')}/${year})`,  value: calls.filter(c => c.status === 'Agendada'  && c.date.startsWith(`${year}-${String(month + 1).padStart(2,'0')}`)).length, color: 'var(--action)' },
             { label: `Realizadas (${String(month + 1).padStart(2,'0')}/${year})`, value: calls.filter(c => c.status === 'Realizada' && c.date.startsWith(`${year}-${String(month + 1).padStart(2,'0')}`)).length, color: 'var(--green)'  },
-            { label: 'Canceladas', value: calls.filter(c => c.status === 'Cancelada').length, color: 'var(--red)'    },
-            { label: 'No-show',    value: calls.filter(c => c.status === 'No-show').length,   color: 'var(--orange)' },
+            { label: `Canceladas (${String(month + 1).padStart(2,'0')}/${year})`, value: calls.filter(c => c.status === 'Cancelada' && c.date.startsWith(`${year}-${String(month + 1).padStart(2,'0')}`)).length, color: 'var(--red)'    },
+            { label: `No-show (${String(month + 1).padStart(2,'0')}/${year})`,    value: calls.filter(c => c.status === 'No-show'   && c.date.startsWith(`${year}-${String(month + 1).padStart(2,'0')}`)).length, color: 'var(--orange)' },
           ] as { label: string; value: number; color: string }[]).map(k => (
             <div key={k.label} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
               <div style={{ fontSize: 28, fontWeight: 800, color: k.color }}>{k.value}</div>
@@ -727,6 +756,110 @@ function AgendaContent() {
           </div>
         </div>
 
+        {/* ── Status de cada reunião/cliente ──────────────────────────────────── */}
+        {(() => {
+          const monthStr = `${year}-${String(month + 1).padStart(2,'0')}`
+          const allMonthCalls = filteredCalls
+            .filter(c => c.date.startsWith(monthStr))
+            .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time))
+          if (allMonthCalls.length === 0) return null
+
+          // Opções únicas para os filtros
+          const respOptions = [...new Set(allMonthCalls.map(c => c.responsible))].sort()
+          const sdrOptions  = [...new Set(allMonthCalls.map(c => c.sdrNome).filter(Boolean))].sort()
+
+          // Aplica filtros
+          const monthCalls = allMonthCalls
+            .filter(c => !tableFilterResp || c.responsible === tableFilterResp)
+            .filter(c => !tableFilterSdr  || c.sdrNome === tableFilterSdr)
+
+          const STATUS_COLOR: Record<string, string> = {
+            Realizada: 'var(--green)', Agendada: 'var(--action)',
+            'Em Atendimento': 'var(--cyan)',
+            Cancelada: 'var(--red)', 'No-show': 'var(--orange)',
+          }
+          const selStyle: React.CSSProperties = {
+            fontSize: 12, padding: '5px 10px', borderRadius: 8,
+            border: '1px solid var(--border)', background: 'var(--bg-card2)',
+            color: 'var(--text)', cursor: 'pointer', fontFamily: 'inherit',
+          }
+          return (
+            <div style={{ marginTop: 20, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
+              <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <div style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>
+                  Reuniões — {MONTHS[month]} {year}
+                </div>
+                {/* Filtro Responsável */}
+                <select value={tableFilterResp} onChange={e => setTableFilterResp(e.target.value)} style={selStyle}>
+                  <option value="">Todos os Responsáveis</option>
+                  {respOptions.map(r => <option key={r} value={r}>{r.split(' ')[0]}</option>)}
+                </select>
+                {/* Filtro SDR */}
+                <select value={tableFilterSdr} onChange={e => setTableFilterSdr(e.target.value)} style={selStyle}>
+                  <option value="">Todos os SDRs</option>
+                  {sdrOptions.map(s => <option key={s} value={s}>{s.split(' ')[0]}</option>)}
+                </select>
+                <span style={{ fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' }}>
+                  {monthCalls.length}/{allMonthCalls.length} call{allMonthCalls.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ background: 'var(--bg-card2)' }}>
+                      {['Data', 'Horário', 'Cliente', 'Responsável', 'SDR', 'Status', 'Ativado', 'Motivo'].map(h => (
+                        <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monthCalls.map((c, i) => {
+                      const color = STATUS_COLOR[c.status] ?? 'var(--text2)'
+                      const motivo = c.motivo_cancelamento || c.motivo_noshow || c.motivo_nao_ativacao || ''
+                      return (
+                        <tr key={c.id}
+                          style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
+                          onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-card2)')}
+                          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                          onClick={() => setSheetCall(c)}>
+                          <td style={{ padding: '10px 14px', whiteSpace: 'nowrap', color: 'var(--text2)', fontSize: 12 }}>
+                            {new Date(c.date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })}
+                          </td>
+                          <td style={{ padding: '10px 14px', whiteSpace: 'nowrap', fontSize: 12 }}>
+                            {c.time}{c.endTime ? ` – ${c.endTime}` : ''}
+                          </td>
+                          <td style={{ padding: '10px 14px', fontWeight: 600, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {c.title || c.clientEmail || '—'}
+                          </td>
+                          <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
+                            <span style={{ fontWeight: 600 }}>{c.responsible.split(' ')[0]}</span>
+                          </td>
+                          <td style={{ padding: '10px 14px', whiteSpace: 'nowrap', color: 'var(--text2)', fontSize: 12 }}>
+                            {c.sdrNome ? c.sdrNome.split(' ')[0] : '—'}
+                          </td>
+                          <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
+                            <span style={{ background: `color-mix(in srgb, ${color} 15%, var(--bg-card2))`, color, border: `1px solid ${color}`, borderRadius: 20, padding: '2px 9px', fontSize: 11, fontWeight: 700 }}>
+                              {c.status}
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
+                            {c.ativado === true  && <span style={{ color: 'var(--green)',  fontWeight: 700, fontSize: 12 }}>✓ Ativado</span>}
+                            {c.ativado === false && <span style={{ color: 'var(--red)',    fontWeight: 600, fontSize: 12 }}>Não Ativado</span>}
+                            {c.ativado === null  && <span style={{ color: 'var(--text2)', fontSize: 12 }}>—</span>}
+                          </td>
+                          <td style={{ padding: '10px 14px', color: 'var(--text2)', fontSize: 12, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {motivo || '—'}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )
+        })()}
+
         {/* ── Performance por Closer ───────────────────────────────────────────── */}
         {closerStats.length > 0 && (
           <div style={{ marginTop: 20, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
@@ -870,9 +1003,13 @@ function AgendaContent() {
               <Sel value={form.status} onChange={v => setForm({ ...form, status: v })}
                 options={['Agendada', 'Realizada', 'Cancelada', 'No-show']} placeholder="Status" />
             </Field>
+            <Field label="Campanha de Captação">
+              <Sel value={form.campanha} onChange={v => setForm({ ...form, campanha: v })}
+                options={CAMPANHAS} placeholder="Selecione a campanha (opcional)" />
+            </Field>
             <Field label="Nome do SDR">
               <Sel value={form.sdrNome} onChange={v => setForm({ ...form, sdrNome: v })}
-                options={users.filter(u => u.role === 'SDR').map(u => ({ value: u.name, label: u.name }))}
+                options={users.filter(u => isSDRRole(u.role) || u.extra_roles?.includes('SDR') || u.extra_roles?.includes('Social Selling')).map(u => ({ value: u.name, label: u.name }))}
                 placeholder="Selecione o SDR (opcional)" />
             </Field>
             <Field label="E-mail do Cliente">
@@ -1025,13 +1162,67 @@ function AgendaContent() {
                 </div>
               )}
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Alterar Status</div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <Button size="sm" variant="success"     icon={CheckCircle} onClick={() => updateStatus(sheetCall.id, 'Realizada')}>Realizada</Button>
-                  <Button size="sm" variant="destructive" icon={XCircle}     onClick={() => updateStatus(sheetCall.id, 'Cancelada')}>Cancelada</Button>
-                  <Button size="sm" variant="warning"     icon={Clock}       onClick={() => updateStatus(sheetCall.id, 'No-show')}>No-show</Button>
+                  <Button size="sm" variant="success"     icon={CheckCircle} onClick={() => { updateStatus(sheetCall.id, 'Realizada'); setPendingStatus(null) }}>Realizada</Button>
+                  <button
+                    onClick={() => { updateStatus(sheetCall.id, 'Em Atendimento'); setPendingStatus(null) }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '7px 14px', borderRadius: 8, border: `1px solid var(--cyan)`,
+                      background: sheetCall.status === 'Em Atendimento' ? 'var(--cyan)' : `color-mix(in srgb, var(--cyan) 12%, var(--bg-card))`,
+                      color: sheetCall.status === 'Em Atendimento' ? '#fff' : 'var(--cyan)',
+                      fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+                      animation: sheetCall.status === 'Em Atendimento' ? 'pulse 1.4s ease-in-out infinite' : 'none',
+                    }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'currentColor', display: 'inline-block', flexShrink: 0 }} />
+                    Em Atendimento
+                  </button>
+                  <Button size="sm" variant="destructive" icon={XCircle}     onClick={() => { setPendingStatus('Cancelada'); setMotivoStatus(sheetCall.motivo_cancelamento || '') }}>Cancelada</Button>
+                  <Button size="sm" variant="warning"     icon={Clock}       onClick={() => { setPendingStatus('No-show'); setMotivoStatus(sheetCall.motivo_noshow || '') }}>No-show</Button>
                 </div>
+
+                {/* Input de motivo — aparece ao clicar em Cancelada ou No-show */}
+                {pendingStatus && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 12, borderRadius: 10, background: `color-mix(in srgb, ${pendingStatus === 'Cancelada' ? 'var(--red)' : 'var(--orange)'} 8%, var(--bg-card2))`, border: `1px solid ${pendingStatus === 'Cancelada' ? 'var(--red)' : 'var(--orange)'}` }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: pendingStatus === 'Cancelada' ? 'var(--red)' : 'var(--orange)' }}>
+                      Motivo da {pendingStatus} <span style={{ fontWeight: 400, color: 'var(--text2)' }}>(opcional)</span>
+                    </div>
+                    <textarea
+                      className="inp"
+                      rows={2}
+                      value={motivoStatus}
+                      onChange={e => setMotivoStatus(e.target.value)}
+                      placeholder={`Informe o motivo da ${pendingStatus.toLowerCase()}…`}
+                      style={{ resize: 'vertical', fontSize: 13 }}
+                    />
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        onClick={() => updateStatus(sheetCall.id, pendingStatus, motivoStatus)}
+                        style={{ flex: 1, padding: '8px', borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700, fontSize: 13, background: pendingStatus === 'Cancelada' ? 'var(--red)' : 'var(--orange)', color: '#fff' }}>
+                        Confirmar {pendingStatus}
+                      </button>
+                      <button
+                        onClick={() => { setPendingStatus(null); setMotivoStatus('') }}
+                        style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card2)', color: 'var(--text2)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13 }}>
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Mostra motivos já salvos */}
+                {!pendingStatus && sheetCall.motivo_cancelamento && sheetCall.status === 'Cancelada' && (
+                  <div style={{ fontSize: 12, color: 'var(--red)', padding: '6px 10px', background: 'color-mix(in srgb, var(--red) 8%, var(--bg-card2))', borderRadius: 8, border: '1px solid var(--red)' }}>
+                    Motivo: {sheetCall.motivo_cancelamento}
+                  </div>
+                )}
+                {!pendingStatus && sheetCall.motivo_noshow && sheetCall.status === 'No-show' && (
+                  <div style={{ fontSize: 12, color: 'var(--orange)', padding: '6px 10px', background: 'color-mix(in srgb, var(--orange) 8%, var(--bg-card2))', borderRadius: 8, border: '1px solid var(--orange)' }}>
+                    Motivo: {sheetCall.motivo_noshow}
+                  </div>
+                )}
               </div>
 
               {/* ── Ativação ──────────────────────────────────────────────── */}
