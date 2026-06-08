@@ -99,14 +99,17 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
     const monthStart = format(startOfMonth(now), 'yyyy-MM-dd')
     const prevMonthStart = format(startOfMonth(subMonths(now, 1)), 'yyyy-MM-dd')
     const prevMonthEnd = format(endOfMonth(subMonths(now, 1)), 'yyyy-MM-dd')
+    // Exclui ativações de GC (gc_ativacao = true) — KPIs refletem apenas Closers, igual ao ranking
+    const closersOnly = () => supabase.from('activations').select('id', { count: 'exact', head: true })
+      .or('gc_ativacao.is.null,gc_ativacao.is.false')
     Promise.all([
-      supabase.from('activations').select('id', { count: 'exact', head: true }).eq('date', todayStr),
-      supabase.from('activations').select('id', { count: 'exact', head: true }).eq('date', yesterdayStr),
-      supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', weekStart).lte('date', todayStr),
-      supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', prevWeekStart).lte('date', prevWeekEnd),
-      supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', monthStart).lte('date', todayStr),
-      supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', prevMonthStart).lte('date', prevMonthEnd),
-      supabase.from('activations').select('id', { count: 'exact', head: true }),
+      closersOnly().eq('date', todayStr),
+      closersOnly().eq('date', yesterdayStr),
+      closersOnly().gte('date', weekStart).lte('date', todayStr),
+      closersOnly().gte('date', prevWeekStart).lte('date', prevWeekEnd),
+      closersOnly().gte('date', monthStart).lte('date', todayStr),
+      closersOnly().gte('date', prevMonthStart).lte('date', prevMonthEnd),
+      closersOnly(),
     ]).then(([r1, r2, r3, r4, r5, r6, r7]) => {
       setKpis({
         today:     r1.count ?? 0,
