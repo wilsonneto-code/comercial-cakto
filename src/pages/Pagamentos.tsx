@@ -65,7 +65,7 @@ const TEAM: TeamMember[] = [
   { display: 'Carlos Eduardo', role: 'sdr',    nivelIdx: 0, nameMatch: 'Carlos Eduardo' },
   { display: 'Geovana Paiva',  role: 'sdr',    nivelIdx: 0, nameMatch: 'Geovana', sdrNomeNull: true },
   // ── Closer ───────────────────────────────────────────────────────────────
-  { display: 'Victor Vieira',  role: 'closer', nivelIdx: 0, nameMatch: 'Victor' },
+  { display: 'Victor Vieira',  role: 'closer', nivelIdx: 0, nameMatch: 'Victor Vieira' },
   { display: 'Isaac Marba',    role: 'closer', nivelIdx: 5, nameMatch: 'Isaac'  },
   { display: 'Wilson Neto',    role: 'closer', nivelIdx: 6, nameMatch: 'Wilson Neto' },
   // ── GC ───────────────────────────────────────────────────────────────────
