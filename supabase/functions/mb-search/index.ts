@@ -410,39 +410,16 @@ serve(async (req) => {
   // ── Modo: TPV por lista de emails — consulta DB #3 (Split) e DB #4 (Cakto)
   if (body.emails && Array.isArray(body.emails)) {
     try {
-    const emailList = body.emails.map((e: string) => `'${e.replace(/'/g, "''")}'`).join(',')
-    if (!emailList) return json({ tpv: {} })
+    const allEmails = (body.emails as string[]).filter(Boolean)
+    if (!allEmails.length) return json({ tpv: {} })
 
-    // DB #3 Cakto Split: payment_payment com liquidAmount e createdAt
-    const sqlSplit = `
-      SELECT
-        u."email",
-        COALESCE(SUM(p."liquidAmount") FILTER (
-          WHERE p."status" = 'paid' AND p."createdAt" >= date_trunc('month', current_date)
-        ), 0) AS tpv_mes,
-        COALESCE(MAX(p."createdAt") FILTER (WHERE p."status" = 'paid'), NULL) AS ultima_venda
-      FROM "public"."user_user" u
-      LEFT JOIN "public"."payment_payment" p ON p."user_id" = u."id"
-      WHERE LOWER(u."email") IN (${emailList.toLowerCase()})
-      GROUP BY u."email"
-    `
-
-    // DB #4 Cakto: gateway_split.totalAmount (cobre produtor, afiliado e coprodutor)
-    // Baseado na query exata do Metabase: gateway_split → gateway_order (paid) → user_user
-    const sqlCakto4 = `
-      SELECT
-        u."email",
-        COALESCE(SUM(gs."totalAmount") FILTER (
-          WHERE go."status" = 'paid'
-            AND DATE_TRUNC('month', gs."createdAt") = DATE_TRUNC('month', CURRENT_DATE)
-        ), 0) AS tpv_mes,
-        COALESCE(MAX(gs."createdAt") FILTER (WHERE go."status" = 'paid'), NULL) AS ultima_venda
-      FROM "public"."user_user" u
-      JOIN "public"."gateway_split" gs ON gs."user_id" = u."id"
-      JOIN "public"."gateway_order" go ON go."id" = gs."order_id"
-      WHERE LOWER(u."email") IN (${emailList.toLowerCase()})
-      GROUP BY u."email"
-    `
+    // Lotes — uma única lista grande (300+ e-mails) faz o IN(...) contra payment_payment
+    // estourar o timeout do Metabase e a query inteira volta vazia. Divide e paraleliza.
+    const EMAIL_BATCH = 120
+    const batches: string[][] = []
+    for (let i = 0; i < allEmails.length; i += EMAIL_BATCH) {
+      batches.push(allEmails.slice(i, i + EMAIL_BATCH))
+    }
 
     const fetchDB4 = (sql: string) => fetch(`${MB_URL}/api/dataset`, {
       method: 'POST',
@@ -450,28 +427,63 @@ serve(async (req) => {
       body: JSON.stringify({ database: 4, type: 'native', native: { query: sql } }),
     }).then(r => r.json()).then(d => ({ rows: d?.data?.rows ?? [] }))
 
-    const [splitResult, caktoResult] = await Promise.all([
-      runSQL(MB_URL, MB_KEY, sqlSplit).catch(() => ({ cols: [], rows: [] })),
-      fetchDB4(sqlCakto4).catch(() => ({ rows: [] })),
-    ])
-
     const tpv: Record<string, { tpv_mes: number; ultima_venda: string | null }> = {}
 
-    splitResult.rows.forEach((r: any[]) => {
-      const email = r[0]?.toLowerCase()
-      if (email) tpv[email] = { tpv_mes: Number(r[1] ?? 0), ultima_venda: r[2] ?? null }
-    })
+    await Promise.all(batches.map(async (batch) => {
+      const emailList = batch.map(e => `'${e.replace(/'/g, "''")}'`).join(',').toLowerCase()
 
-    // Mescla resultado do Cakto #4 — usa o maior valor
-    caktoResult.rows.forEach((r: any[]) => {
-      const email = r[0]?.toLowerCase()
-      if (!email) return
-      const val = Number(r[1] ?? 0)
-      const existing = tpv[email]
-      if (!existing || val > existing.tpv_mes) {
-        tpv[email] = { tpv_mes: val, ultima_venda: r[2] ?? existing?.ultima_venda ?? null }
-      }
-    })
+      // DB #3 Cakto Split: payment_payment com liquidAmount e createdAt
+      const sqlSplit = `
+        SELECT
+          u."email",
+          COALESCE(SUM(p."liquidAmount") FILTER (
+            WHERE p."status" = 'paid' AND p."createdAt" >= date_trunc('month', current_date)
+          ), 0) AS tpv_mes,
+          COALESCE(MAX(p."createdAt") FILTER (WHERE p."status" = 'paid'), NULL) AS ultima_venda
+        FROM "public"."user_user" u
+        LEFT JOIN "public"."payment_payment" p ON p."user_id" = u."id"
+        WHERE LOWER(u."email") IN (${emailList})
+        GROUP BY u."email"
+      `
+
+      // DB #4 Cakto: gateway_split.totalAmount (cobre produtor, afiliado e coprodutor)
+      // Baseado na query exata do Metabase: gateway_split → gateway_order (paid) → user_user
+      const sqlCakto4 = `
+        SELECT
+          u."email",
+          COALESCE(SUM(gs."totalAmount") FILTER (
+            WHERE go."status" = 'paid'
+              AND DATE_TRUNC('month', gs."createdAt") = DATE_TRUNC('month', CURRENT_DATE)
+          ), 0) AS tpv_mes,
+          COALESCE(MAX(gs."createdAt") FILTER (WHERE go."status" = 'paid'), NULL) AS ultima_venda
+        FROM "public"."user_user" u
+        JOIN "public"."gateway_split" gs ON gs."user_id" = u."id"
+        JOIN "public"."gateway_order" go ON go."id" = gs."order_id"
+        WHERE LOWER(u."email") IN (${emailList})
+        GROUP BY u."email"
+      `
+
+      const [splitResult, caktoResult] = await Promise.all([
+        runSQL(MB_URL, MB_KEY, sqlSplit).catch(() => ({ cols: [], rows: [] })),
+        fetchDB4(sqlCakto4).catch(() => ({ rows: [] })),
+      ])
+
+      splitResult.rows.forEach((r: any[]) => {
+        const email = r[0]?.toLowerCase()
+        if (email) tpv[email] = { tpv_mes: Number(r[1] ?? 0), ultima_venda: r[2] ?? null }
+      })
+
+      // Mescla resultado do Cakto #4 — usa o maior valor
+      caktoResult.rows.forEach((r: any[]) => {
+        const email = r[0]?.toLowerCase()
+        if (!email) return
+        const val = Number(r[1] ?? 0)
+        const existing = tpv[email]
+        if (!existing || val > existing.tpv_mes) {
+          tpv[email] = { tpv_mes: val, ultima_venda: r[2] ?? existing?.ultima_venda ?? null }
+        }
+      })
+    }))
 
     return json({ tpv })
     } catch (_) {
@@ -561,6 +573,11 @@ serve(async (req) => {
   }
 
   // ── Modo padrão: carteiras por account_manager_id ──────────────────────
+  // ref_month: 'YYYY-MM' — se não informado, usa o mês atual
+  const refMonthParam: string = (body.ref_month as string) || new Date().toISOString().slice(0, 7)
+  const refMonthStart = `${refMonthParam}-01`
+  const refMonthEnd   = `${refMonthParam}-01`  // DATE_TRUNC vai tratar como início do mês
+
   const amIds = Object.keys(GERENTES).join(',')
   let allRows: any[] = []
   let offset = 0
@@ -585,7 +602,8 @@ serve(async (req) => {
           SUM("liquidAmount") FILTER (WHERE "status" = 'paid'
             AND "createdAt" >= CURRENT_DATE - INTERVAL '30 days') AS tpv_30d,
           SUM("liquidAmount") FILTER (WHERE "status" = 'paid'
-            AND "createdAt" >= date_trunc('month', current_date)) AS tpv_mes,
+            AND "createdAt" >= DATE_TRUNC('month', '${refMonthStart}'::date)
+            AND "createdAt" <  DATE_TRUNC('month', '${refMonthStart}'::date) + INTERVAL '1 month') AS tpv_mes,
           SUM("liquidAmount") FILTER (WHERE "status" = 'paid') AS tpv_total,
           MAX("createdAt") FILTER (WHERE "status" = 'paid') AS ultima_venda
         FROM "public"."payment_payment"
@@ -623,7 +641,8 @@ serve(async (req) => {
             u."email",
             COALESCE(SUM(gs."totalAmount") FILTER (
               WHERE go."status" = 'paid'
-                AND DATE_TRUNC('month', gs."createdAt") = DATE_TRUNC('month', CURRENT_DATE)
+                AND gs."createdAt" >= DATE_TRUNC('month', '${refMonthStart}'::date)
+                AND gs."createdAt" <  DATE_TRUNC('month', '${refMonthStart}'::date) + INTERVAL '1 month'
             ), 0) AS tpv_mes,
             COALESCE(SUM(gs."totalAmount") FILTER (WHERE go."status" = 'paid'), 0) AS tpv_total
           FROM "public"."user_user" u
