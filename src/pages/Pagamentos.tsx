@@ -54,7 +54,7 @@ interface TeamMember {
   role: 'sdr' | 'closer' | 'gc'
   nivelIdx: number
   nameMatch: string
-  sdrNomeNull?: boolean   // Geovana: conta calls onde sdr_nome IS NULL
+  badge?: string           // label extra no card (ex: 'Social Selling')
   // GC: carteira de referência e % de manutenção
   portfolioGmv?: number
   maintenancePct?: number
@@ -62,8 +62,9 @@ interface TeamMember {
 
 const TEAM: TeamMember[] = [
   // ── SDR ──────────────────────────────────────────────────────────────────
-  { display: 'Carlos Eduardo', role: 'sdr',    nivelIdx: 0, nameMatch: 'Carlos Eduardo' },
-  { display: 'Geovana Paiva',  role: 'sdr',    nivelIdx: 0, nameMatch: 'Geovana', sdrNomeNull: true },
+  { display: 'Carlos Eduardo',  role: 'sdr', nivelIdx: 0, nameMatch: 'Carlos Eduardo' },
+  { display: 'Geovana Paiva',   role: 'sdr', nivelIdx: 0, nameMatch: 'Geovana' },
+  { display: 'Victor Gabriel',  role: 'sdr', nivelIdx: 0, nameMatch: 'Victor Gabriel', badge: 'Social Selling' },
   // ── Closer ───────────────────────────────────────────────────────────────
   { display: 'Victor Vieira',  role: 'closer', nivelIdx: 0, nameMatch: 'Victor Vieira' },
   { display: 'Isaac Marba',    role: 'closer', nivelIdx: 5, nameMatch: 'Isaac'  },
@@ -284,11 +285,9 @@ function PagamentosContent() {
 
       // ── SDR ──────────────────────────────────────────────────────────────
       if (m.role === 'sdr') {
-        const callsAll = callsData.filter(c => {
-          if (m.sdrNomeNull)
-            return !c.sdr_nome || c.sdr_nome.toLowerCase().includes(m.nameMatch.toLowerCase())
-          return c.sdr_nome?.toLowerCase().includes(m.nameMatch.toLowerCase())
-        })
+        const callsAll = callsData.filter(c =>
+          c.sdr_nome?.toLowerCase().includes(m.nameMatch.toLowerCase())
+        )
         const agendadas  = callsAll.length
         const realizadas = callsAll.filter(c => c.status === 'Realizada' || c.status === 'Ativado').length
         const showupPct  = agendadas > 0 ? Math.round((realizadas / agendadas) * 100) : 0
@@ -296,6 +295,7 @@ function PagamentosContent() {
         const callsSorted = [...callsAll].sort((a, b) => a.date.localeCompare(b.date) || (a.time ?? '').localeCompare(b.time ?? ''))
         return {
           ...m, fixo, teto, nivel, cor, variavel, total: fixo + variavel,
+          badge: m.badge,
           sdr: { agendadas, realizadas, showupPct,
             metaAgend: SDR_META_AGEND[m.nivelIdx], metaShowup: SDR_META_SHOWUP[m.nivelIdx],
             rate: SDR_RATE[m.nivelIdx],
@@ -681,7 +681,7 @@ function SectionHeader({ label, note, color }: { label: string; note: string; co
 
 // ── SDR ────────────────────────────────────────────────────────────────────────
 interface SdrCalc {
-  display: string; role: 'sdr'; nivelIdx: number; cor: string
+  display: string; role: 'sdr'; nivelIdx: number; cor: string; badge?: string
   fixo: number; teto: number; nivel: string; variavel: number; total: number
   sdr: {
     agendadas: number; realizadas: number; showupPct: number; metaAgend: number; metaShowup: number; rate: number
@@ -705,7 +705,7 @@ function SdrCard({ m }: { m: SdrCalc }) {
 
   return (
     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, marginBottom: 12 }}>
-      <CardHeader display={m.display} role="sdr" nivel={m.nivel} fixo={m.fixo} total={m.total} cor={cor} />
+      <CardHeader display={m.display} role="sdr" nivel={m.nivel} fixo={m.fixo} total={m.total} cor={cor} badge={m.badge} />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
         {[
