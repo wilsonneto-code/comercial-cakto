@@ -65,6 +65,7 @@ type CallItem = {
   motivo_noshow:         string | null
   sdrNome:               string
   image_urls:            string[]
+  updatedAt:             string | null
 }
 
 const CAMPANHAS = [
@@ -141,7 +142,7 @@ function AgendaContent() {
       setIsLoading(true);
       const [{ data: dbCalls, error: ce }, { data: dbUsers, error: ue }, { data: dbHistory }] = await Promise.all([
         supabase.from('calls')
-          .select('id,title,date,time,end_time,responsible,status,notes,client_email,google_event_id,meet_link,ativado,motivo_nao_ativacao,motivo_cancelamento,motivo_noshow,sdr_nome,image_urls')
+          .select('id,title,date,time,end_time,responsible,status,notes,client_email,google_event_id,meet_link,ativado,motivo_nao_ativacao,motivo_cancelamento,motivo_noshow,sdr_nome,image_urls,updated_at,created_at')
           .order('date').order('time'),
         supabase.from('users').select('id,name,role,email,extra_roles').order('name'),
         supabase.from('calls_history')
@@ -173,6 +174,7 @@ function AgendaContent() {
         sdrNome:              c.sdr_nome || 'Carlos Eduardo',
         campanha:             c.campanha ?? '',
         image_urls:          (c.image_urls as string[]) ?? [],
+        updatedAt:            c.updated_at !== c.created_at ? (c.updated_at ?? null) : null,
         ...(period !== undefined ? { period } : {}),
       });
 
@@ -413,13 +415,14 @@ function AgendaContent() {
   }
 
   async function updateStatus(id: string, status: string, motivo?: string) {
-    const patch: Record<string, unknown> = { status: status as CallStatus }
+    const now = new Date().toISOString()
+    const patch: Record<string, unknown> = { status: status as CallStatus, updated_at: now }
     if (status === 'Cancelada' && motivo !== undefined) patch.motivo_cancelamento = motivo || null
     if (status === 'No-show'   && motivo !== undefined) patch.motivo_noshow       = motivo || null
     const { error } = await supabase.from('calls').update(patch).eq('id', id);
     if (error) { toast(error.message, 'error'); return; }
-    setCalls(p => p.map(c => c.id === id ? { ...c, status, ...patch } : c));
-    setSheetCall(prev => prev?.id === id ? { ...prev, status, ...patch } as CallItem : prev);
+    setCalls(p => p.map(c => c.id === id ? { ...c, status, ...patch, updatedAt: now } : c));
+    setSheetCall(prev => prev?.id === id ? { ...prev, status, ...patch, updatedAt: now } as CallItem : prev);
     toast(`Status: ${status}`, 'success');
     setPendingStatus(null);
     setMotivoStatus('');
@@ -447,12 +450,14 @@ function AgendaContent() {
     const patch: Record<string, unknown> = {
       ativado,
       motivo_nao_ativacao: ativado ? null : (motivo ?? ''),
+      updated_at: new Date().toISOString(),
       ...(uploadedUrls.length > 0 ? { image_urls: allUrls } : {}),
     }
     const { error } = await supabase.from('calls').update(patch).eq('id', id);
+    const updatedAt = patch.updated_at as string
     if (error) { toast(error.message, 'error'); return; }
-    setCalls(p => p.map(c => c.id === id ? { ...c, ...patch, image_urls: allUrls } : c));
-    setSheetCall(prev => prev?.id === id ? { ...prev, ...patch, image_urls: allUrls } : prev);
+    setCalls(p => p.map(c => c.id === id ? { ...c, ...patch, image_urls: allUrls, updatedAt } : c));
+    setSheetCall(prev => prev?.id === id ? { ...prev, ...patch, image_urls: allUrls, updatedAt } : prev);
     setMotivoImages([])
     toast(ativado ? 'Marcado como Ativado ✓' : 'Marcado como Não Ativado', 'success');
   }
@@ -807,7 +812,7 @@ function AgendaContent() {
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                   <thead>
                     <tr style={{ background: 'var(--bg-card2)' }}>
-                      {['Data', 'Horário', 'Cliente', 'Responsável', 'SDR', 'Status', 'Ativado', 'Motivo'].map(h => (
+                      {['Data', 'Horário', 'Cliente', 'Responsável', 'SDR', 'Status', 'Ativado', 'Movimentação', 'Motivo'].map(h => (
                         <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{h}</th>
                       ))}
                     </tr>
@@ -846,6 +851,11 @@ function AgendaContent() {
                             {c.ativado === true  && <span style={{ color: 'var(--green)',  fontWeight: 700, fontSize: 12 }}>✓ Ativado</span>}
                             {c.ativado === false && <span style={{ color: 'var(--red)',    fontWeight: 600, fontSize: 12 }}>Não Ativado</span>}
                             {c.ativado === null  && <span style={{ color: 'var(--text2)', fontSize: 12 }}>—</span>}
+                          </td>
+                          <td style={{ padding: '10px 14px', whiteSpace: 'nowrap', color: 'var(--text2)', fontSize: 12 }}>
+                            {c.updatedAt
+                              ? new Date(c.updatedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+                              : '—'}
                           </td>
                           <td style={{ padding: '10px 14px', color: 'var(--text2)', fontSize: 12, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {motivo || '—'}
