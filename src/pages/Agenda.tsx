@@ -134,6 +134,9 @@ function AgendaContent() {
   // Filtros da tabela de reuniões
   const [tableFilterResp, setTableFilterResp] = useState('');
   const [tableFilterSdr,  setTableFilterSdr]  = useState('');
+  // Filtros da agenda (calendário + próximas calls)
+  const [statusFilter,   setStatusFilter]   = useState('');
+  const [campanhaFilter, setCampanhaFilter] = useState('');
 
   const [history, setHistory]               = useState<HistoryCall[]>([]);
   const [expandedPeriods, setExpandedPeriods] = useState<Set<string>>(new Set());
@@ -224,7 +227,11 @@ function AgendaContent() {
   }
 
   const closers       = users.filter(u => u.role === 'Closer');
-  const filteredCalls = activeTab === 'Todos' ? calls : calls.filter(c => c.responsible === activeTab);
+  const filteredCalls = calls.filter(c =>
+    (activeTab === 'Todos' || c.responsible === activeTab) &&
+    (!statusFilter || c.status === statusFilter) &&
+    (!campanhaFilter || c.campanha === campanhaFilter)
+  );
 
   // ── Calendar helpers ───────────────────────────────────────────────────────
   const firstDay    = new Date(year, month, 1).getDay();
@@ -549,20 +556,32 @@ function AgendaContent() {
           ))}
         </div>
 
-        {/* ── Tabs por Closer ─────────────────────────────────────────────────── */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-          {(['Todos', ...closers.map(c => c.name)] as string[]).map(tab => {
-            const isActive = activeTab === tab;
-            const bg = isActive ? (tab === 'Todos' ? 'var(--action)' : closerColor(tab)) : 'var(--bg-card)';
-            return (
-              <button key={tab} onClick={() => setActiveTab(tab)} style={{
-                padding: '6px 18px', borderRadius: 20,
-                border: `1px solid ${isActive ? 'transparent' : 'var(--border)'}`,
-                background: bg, color: isActive ? '#fff' : 'var(--text)',
-                fontWeight: 600, fontSize: 13, cursor: 'pointer', transition: 'all .15s',
-              }}>{tab === 'Todos' ? 'Todos' : tab.split(' ')[0]}</button>
-            );
-          })}
+        {/* ── Tabs por Closer + Filtros ───────────────────────────────────────── */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {(['Todos', ...closers.map(c => c.name)] as string[]).map(tab => {
+              const isActive = activeTab === tab;
+              const bg = isActive ? (tab === 'Todos' ? 'var(--action)' : closerColor(tab)) : 'var(--bg-card)';
+              return (
+                <button key={tab} onClick={() => setActiveTab(tab)} style={{
+                  padding: '6px 18px', borderRadius: 20,
+                  border: `1px solid ${isActive ? 'transparent' : 'var(--border)'}`,
+                  background: bg, color: isActive ? '#fff' : 'var(--text)',
+                  fontWeight: 600, fontSize: 13, cursor: 'pointer', transition: 'all .15s',
+                }}>{tab === 'Todos' ? 'Todos' : tab.split(' ')[0]}</button>
+              );
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ minWidth: 170 }}>
+              <Sel value={statusFilter} onChange={setStatusFilter}
+                options={Object.keys(CALL_STATUS_COLORS)} placeholder="Todos os Status" />
+            </div>
+            <div style={{ minWidth: 220 }}>
+              <Sel value={campanhaFilter} onChange={setCampanhaFilter}
+                options={CAMPANHAS} placeholder="Todas as Campanhas" />
+            </div>
+          </div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 20 }}>
