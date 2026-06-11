@@ -24,8 +24,10 @@ import DebugMb from './pages/DebugMb'
 import GCAtivacoes from './pages/GCAtivacoes'
 import DashboardTarefasGC from './pages/DashboardTarefasGC'
 import GCTaskAlert from './components/GCTaskAlert'
+import CloserMeetingAlert from './components/CloserMeetingAlert'
 import PreviewBanner from './components/PreviewBanner'
 import PlanoCarreira from './pages/PlanoCarreira'
+import RelatorioMensal from './pages/RelatorioMensal'
 import { Sidebar } from '../components/Sidebar'
 import { SidebarProvider } from '../lib/sidebarContext'
 
@@ -38,7 +40,7 @@ const MAIN_DOMAINS = [
   'comercial-cakto.vercel.app',
 ]
 
-const SOCIO_ALLOWED = ['/', '/relatorio-calls', '/dashboards', '/dashboard/', '/metabase', '/ranking', '/plano-carreira', '/login']
+const SOCIO_ALLOWED = ['/', '/agenda', '/relatorio-calls', '/dashboards', '/dashboard/', '/dp6eafp', '/ranking', '/plano-carreira', '/login']
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -115,14 +117,16 @@ export default function App() {
       <Route path="/gc-ativacoes" element={<ProtectedRoute><GCAtivacoes /></ProtectedRoute>} />
       <Route path="/pagamentos" element={<ProtectedRoute><Pagamentos /></ProtectedRoute>} />
       <Route path="/carteiras" element={<ProtectedRoute><Carteiras /></ProtectedRoute>} />
-      <Route path="/metabase" element={<ProtectedRoute><Carteiras /></ProtectedRoute>} />
+      <Route path="/dp6eafp" element={<ProtectedRoute><Carteiras /></ProtectedRoute>} />
       <Route path="/dashboard-gc" element={<ProtectedRoute><DashboardGC /></ProtectedRoute>} />
       <Route path="/debug-mb" element={<ProtectedRoute><DebugMb /></ProtectedRoute>} />
       <Route path="/dashboard/tarefas-gc" element={<ProtectedRoute><DashboardTarefasGC /></ProtectedRoute>} />
       <Route path="/plano-carreira" element={<ProtectedRoute><PlanoCarreira /></ProtectedRoute>} />
+      <Route path="/relatorio-mensal" element={<ProtectedRoute><RelatorioMensal /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
     <GCTaskAlert />
+    <CloserMeetingAlert />
     <PreviewBanner />
     </>
     </SidebarProvider>

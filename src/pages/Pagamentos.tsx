@@ -55,6 +55,7 @@ interface TeamMember {
   nivelIdx: number
   nameMatch: string
   badge?: string           // label extra no card (ex: 'Social Selling')
+  includesNullSdr?: boolean // atribui calls com sdr_nome=null a este membro (padrão DashboardSDR)
   // GC: carteira de referência e % de manutenção
   portfolioGmv?: number
   maintenancePct?: number
@@ -62,12 +63,11 @@ interface TeamMember {
 
 const TEAM: TeamMember[] = [
   // ── SDR ──────────────────────────────────────────────────────────────────
-  { display: 'Carlos Eduardo',  role: 'sdr', nivelIdx: 0, nameMatch: 'Carlos Eduardo' },
+  { display: 'Carlos Eduardo',  role: 'sdr', nivelIdx: 0, nameMatch: 'Carlos Eduardo', includesNullSdr: true },
   { display: 'Geovana Paiva',   role: 'sdr', nivelIdx: 0, nameMatch: 'Geovana' },
   { display: 'Victor Gabriel',  role: 'sdr', nivelIdx: 0, nameMatch: 'Victor Gabriel', badge: 'Social Selling' },
   // ── Closer ───────────────────────────────────────────────────────────────
   { display: 'Victor Vieira',  role: 'closer', nivelIdx: 0, nameMatch: 'Victor Vieira' },
-  { display: 'Isaac Marba',    role: 'closer', nivelIdx: 5, nameMatch: 'Isaac'  },
   { display: 'Wilson Neto',    role: 'closer', nivelIdx: 6, nameMatch: 'Wilson Neto' },
   // ── GC ───────────────────────────────────────────────────────────────────
   // portfolioGmv = GMV total da carteira estabelecida
@@ -286,6 +286,7 @@ function PagamentosContent() {
       // ── SDR ──────────────────────────────────────────────────────────────
       if (m.role === 'sdr') {
         const callsAll = callsData.filter(c =>
+          (m.includesNullSdr && c.sdr_nome === null) ||
           c.sdr_nome?.toLowerCase().includes(m.nameMatch.toLowerCase())
         )
         const agendadas  = callsAll.length

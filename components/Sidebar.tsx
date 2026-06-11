@@ -2,7 +2,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import {
   Users, Zap, Trophy, FileText, Package, Calendar, Phone,
   LayoutDashboard, Briefcase, Target, Database, GitMerge,
-  TrendingUp, CreditCard, Settings, ChevronLeft, ChevronRight,
+  TrendingUp, CreditCard, Settings, ChevronLeft, ChevronRight, BarChart2,
 } from 'lucide-react'
 import { useSidebar } from '@/lib/sidebarContext'
 import { useAuth, hasAnyRole } from '@/lib/authContext'
@@ -20,8 +20,9 @@ const ALL_ITEMS: NavItem[] = [
   { key: 'dashboards',         label: 'Dashboards',          Icon: LayoutDashboard},
   { key: 'gerente-contas',     label: 'Gerente de Contas',   Icon: Briefcase      },
   { key: 'gc-ativacoes',       label: 'GC — Ativações',      Icon: Target         },
-  { key: 'metabase',           label: 'MetaBase',            Icon: Database       },
+  { key: 'dp6eafp',            label: 'MetaBase',            Icon: Database       },
   { key: 'relatorio-pipeline', label: 'Pipeline',            Icon: GitMerge       },
+  { key: 'relatorio-mensal',  label: 'Relatório Mensal',    Icon: BarChart2      },
   { key: 'plano-carreira',     label: 'Plano de Carreira',   Icon: TrendingUp     },
   { key: 'pagamentos',         label: 'Pagamentos',          Icon: CreditCard     },
   { key: 'configuracoes',      label: 'Configurações',       Icon: Settings       },
@@ -33,19 +34,22 @@ export function Sidebar() {
   const navigate = useNavigate()
   const { pathname } = useLocation()
 
-  const isSocio = hasAnyRole(user, ['Sócio']) && !hasAnyRole(user, ['Admin'])
-  const isAdmin = hasAnyRole(user, ['Admin'])
-  const isGC    = hasAnyRole(user, ['Admin', 'Gerente de Contas'])
+  const isSocio        = hasAnyRole(user, ['Sócio']) && !hasAnyRole(user, ['Admin'])
+  const isAdmin        = hasAnyRole(user, ['Admin'])
+  const isGC           = hasAnyRole(user, ['Admin', 'Gerente de Contas'])
+  const isSocialSelling = user?.role === 'Social Selling'
 
   let visibleKeys: string[]
   if (isSocio) {
-    visibleKeys = ['relatorio-calls', 'dashboards', 'metabase', 'ranking', 'plano-carreira']
+    visibleKeys = ['agenda', 'relatorio-calls', 'dashboards', 'dp6eafp', 'ranking', 'relatorio-pipeline', 'plano-carreira']
   } else {
     visibleKeys = [
       'responsaveis', 'ativacoes', 'ranking', 'formularios',
       'estoque', 'agenda', 'relatorio-calls', 'dashboards',
-      ...(isGC    ? ['gerente-contas', 'gc-ativacoes', 'metabase', 'relatorio-pipeline'] : []),
-      ...(isAdmin ? ['plano-carreira', 'configuracoes'] : []),
+      ...(isGC           ? ['gerente-contas', 'gc-ativacoes', 'dp6eafp', 'relatorio-pipeline'] : []),
+      ...(isAdmin        ? ['relatorio-mensal'] : []),
+      ...(isSocialSelling ? ['gerente-contas'] : []),
+      ...(isAdmin        ? ['plano-carreira', 'configuracoes'] : []),
       'pagamentos',
     ]
   }
