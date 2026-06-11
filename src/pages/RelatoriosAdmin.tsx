@@ -13,6 +13,7 @@ import { LineAreaChart } from '@/components/ui/charts/LineAreaChart'
 import { DonutChart } from '@/components/ui/charts/DonutChart'
 import { ChevronLeft, RefreshCw, Loader2, Users, Zap, Phone, TrendingUp } from 'lucide-react'
 import { GOALS, metaColor } from '@/lib/goals'
+import { isSDRRole } from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type DbUser       = { id: string; name: string; role: string; email: string; active: boolean }
@@ -40,8 +41,10 @@ function getRange(preset: Preset, customFrom: string, customTo: string) {
   if (preset === '15d')  return { inicio: sub(14),    fim: fmt(today), label: 'Últimos 15 dias' }
   if (preset === '30d')  return { inicio: sub(29),    fim: fmt(today), label: 'Últimos 30 dias' }
   if (preset === 'mes') {
-    const m = fmt(today).slice(0, 7)
-    return { inicio: `${m}-01`, fim: `${m}-31`, label: today.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) }
+    const y = today.getFullYear(), mo = today.getMonth() + 1
+    const inicio = `${y}-${String(mo).padStart(2,'0')}-01`
+    const fim    = fmt(new Date(y, mo, 0))
+    return { inicio, fim, label: today.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) }
   }
   const from = customFrom || fmt(today)
   const to   = customTo   || fmt(today)
@@ -99,7 +102,7 @@ function RelatoriosContent({ onBack }: { onBack?: () => void }) {
     setIsLoading(true)
     const [{ data: u }, { data: a }, { data: c }, { data: n }] = await Promise.all([
       supabase.from('users').select('id,name,role,email,active').order('name'),
-      supabase.from('activations').select('id,client,email,responsible,date,channel,faturamento_mensal,gerente_id,gc_status,welcome_sent').gte('date', inicio).lte('date', fim),
+      supabase.from('activations').select('id,client,email,responsible,date,channel,faturamento_mensal,gerente_id,gc_status,welcome_sent').gte('date', inicio).lte('date', fim).or('gc_ativacao.is.null,gc_ativacao.is.false'),
       supabase.from('calls').select('id,date,status,responsible,sdr_nome,client_email,ativado,motivo_nao_ativacao').gte('date', inicio).lte('date', fim),
       supabase.from('carteira_notas').select('email,motivo,data_contato'),
     ])
@@ -112,7 +115,7 @@ function RelatoriosContent({ onBack }: { onBack?: () => void }) {
 
   const refresh = async () => { setIsRefresh(true); await load(); setIsRefresh(false) }
 
-  const sdrs     = useMemo(() => users.filter(u => u.role === 'SDR'), [users])
+  const sdrs     = useMemo(() => users.filter(u => isSDRRole(u.role)), [users])
   const closers  = useMemo(() => users.filter(u => u.role === 'Closer'), [users])
   const gerentes = useMemo(() => users.filter(u => u.role === 'Gerente de Contas'), [users])
   const notaMap  = useMemo(() => Object.fromEntries(notas.map(n => [n.email, n])), [notas])
@@ -292,7 +295,7 @@ function TabGeral({ activations, calls, users, inicio, fim, card, lbl, isMes }: 
 
   const sdrCallMap: Record<string, number> = {}
   calls.filter((c: any) => c.status === 'Realizada').forEach((c: any) => {
-    const n = c.sdr_nome || 'Sem SDR'
+    const n = c.sdr_nome || 'Carlos Eduardo'
     sdrCallMap[n] = (sdrCallMap[n] ?? 0) + 1
   })
   const topSDRs = Object.entries(sdrCallMap).sort((a, b) => b[1] - a[1]).slice(0, 6)
@@ -764,7 +767,7 @@ function TabCalls({ calls, sdrs, inicio, fim, card, lbl, isMes }: any) {
 
   const sdrMap: Record<string, { ag: number; re: number; ns: number; ca: number; at: number }> = {}
   base.forEach((c: any) => {
-    const n = c.sdr_nome || 'Sem SDR'
+    const n = c.sdr_nome || 'Carlos Eduardo'
     if (!sdrMap[n]) sdrMap[n] = { ag: 0, re: 0, ns: 0, ca: 0, at: 0 }
     sdrMap[n].ag++
     if (c.status === 'Realizada') sdrMap[n].re++

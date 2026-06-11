@@ -13,6 +13,7 @@ import { useToast } from '@/components/ui/Toast'
 import { supabase } from '@/lib/supabase/client'
 import { getMbClientes, getMbTpvByEmails, invalidateMbCache } from '@/lib/mbCache'
 import { avatarColor } from '@/lib/utils'
+import { logActivity } from '@/lib/activityLog'
 
 const DAYS   = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb']
 const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
@@ -31,6 +32,25 @@ const MEET_STATUS_COLORS: Record<string, string> = {
   Cancelada: 'var(--red)',
   'No-show': 'var(--orange)',
 }
+
+// Cores distintas por gerente — usadas no calendário e sidebar
+const GERENTE_COLORS: Record<string, string> = {
+  '0bfe1dcb-9827-4a2a-8850-8343c53985f5': '#07BA1C', // Carlos Eduardo — verde
+  'ea6caf80-fea1-4cd5-b7e0-6a124b783e04': '#2BB9FF', // Gabriel Bairros — azul
+  '4923ac02-3f50-49b9-8443-f7e1b0e9f6d6': '#BF5AF2', // Rafael Mendes   — roxo
+}
+function gerenteColor(gerenteId: string | null): string {
+  return (gerenteId && GERENTE_COLORS[gerenteId]) || 'var(--action)'
+}
+
+// Opções de resultado da reunião GC
+const GC_OUTCOMES = [
+  { key: 'ativado',             label: 'Ativado',               color: '#34C759' },
+  { key: 'nao_ativado',         label: 'Não Ativado',           color: '#FF3B30' },
+  { key: 'churn_recuperado',    label: 'Churn Recuperado',      color: '#5AABB5' },
+  { key: 'churn_nao_recuperado',label: 'Churn Não Recuperado',  color: '#FF9F0A' },
+  { key: 'onboarding',          label: 'Reunião de Onboarding', color: '#2997FF' },
+] as const
 
 type DbUser       = { id: string; name: string; role: string; email?: string }
 const KANBAN_COLS = [
@@ -54,9 +74,20 @@ type Meeting = {
   title: string; date: string; time: string; endTime: string
   status: string; notes: string; clientEmail: string
   google_event_id: string; meet_link: string; gerenteName: string
+  gc_outcome: string | null; gc_outcome_notes: string | null
+  agendado_por: string | null
 }
 
-function funil(fat: number | null): 'Starter' | 'Growth' | 'Enterprise' | null {
+// Mapeamento inverso: gerente_id → tier (GC ativações seguem o gerente, não o faturamento)
+const FUNIL_POR_GERENTE: Record<string, 'Starter' | 'Growth' | 'Enterprise'> = {
+  '0bfe1dcb-9827-4a2a-8850-8343c53985f5': 'Starter',    // Carlos Eduardo
+  'ea6caf80-fea1-4cd5-b7e0-6a124b783e04': 'Growth',     // Gabriel Bairros
+  '4923ac02-3f50-49b9-8443-f7e1b0e9f6d6': 'Enterprise', // Rafael Mendes
+}
+
+function funil(fat: number | null, gerenteId?: string | null): 'Starter' | 'Growth' | 'Enterprise' | null {
+  // Se há gerente, o tier é determinado pelo gerente (não pelo faturamento)
+  if (gerenteId && FUNIL_POR_GERENTE[gerenteId]) return FUNIL_POR_GERENTE[gerenteId]
   if (fat === null || fat === undefined) return null
   if (fat <= 50000)  return 'Starter'
   if (fat <= 250000) return 'Growth'
@@ -101,7 +132,7 @@ export default function GerenteContas() {
   const navigate = useNavigate()
   useEffect(() => { if (!loading && !user) navigate('/login') }, [user, loading, navigate])
   if (loading || !user) return null
-  if (!hasAnyRole(user, ['Admin', 'Gerente de Contas'])) {
+  if (!hasAnyRole(user, ['Admin', 'Gerente de Contas', 'Social Selling'])) {
     return (
       <>
         <Header />
@@ -120,7 +151,8 @@ function GCContent() {
   const today    = new Date()
   const todayStr = today.toISOString().slice(0,10)
 
-  const [tab, setTab]             = useState<'kanban' | 'funis' | 'agenda' | 'tarefas'>('kanban')
+  const isSocialSelling = user?.role === 'Social Selling'
+  const [tab, setTab]             = useState<'kanban' | 'funis' | 'agenda' | 'tarefas'>(isSocialSelling ? 'agenda' : 'kanban')
   const [gcConnected, setGcConnected] = useState<boolean | null>(null)
   const [users, setUsers]         = useState<DbUser[]>([])
   const [activations, setActs]    = useState<DbActivation[]>([])
@@ -157,6 +189,7 @@ function GCContent() {
   // Filtros
   const [filterGerente, setFilterGerente] = useState('')
   const [filterMonth,   setFilterMonth]   = useState(() => today.toISOString().slice(0, 7))
+  const [search,        setSearch]        = useState('')
 
   // Calendário
   const [year, setYear]   = useState(today.getFullYear())
@@ -173,6 +206,9 @@ function GCContent() {
   // Modal simplificado para agendar reunião direto do card
   const [quickMeetClient, setQuickMeetClient] = useState<DbActivation | null>(null)
   const [quickMeetForm,   setQuickMeetForm]   = useState({ date: '', time: '', endTime: '' })
+  // Modal de resultado da reunião GC
+  const [outcomeModal,    setOutcomeModal]    = useState<{ meetId: string; outcomeKey: string; label: string; color: string } | null>(null)
+  const [outcomeNotes,    setOutcomeNotes]    = useState('')
 
   // ── Nova Tarefa ──────────────────────────────────────────────────────────
   const EMPTY_TASK_FORM = { activation_id: '', gerente_id: '', tipo: '', title: '', due_date: '', notes: '' }
@@ -266,7 +302,7 @@ function GCContent() {
       const [{ data: usrs }, { data: acts }, { data: mtgs }] = await Promise.all([
         supabase.from('users').select('id,name,role,email').order('name'),
         supabase.from('activations').select('id,client,email,phone,responsible,date,notes,faturamento_mensal,gerente_id,gc_status,welcome_sent').order('date', { ascending: false }),
-        supabase.from('followup_meetings').select('*').order('date').order('time'),
+        supabase.from('followup_meetings').select('*,agendado_por').order('date').order('time'),
       ])
       const userList = (usrs || []) as DbUser[]
       setUsers(userList)
@@ -321,6 +357,9 @@ function GCContent() {
         status: m.status, notes: m.notes || '', clientEmail: m.client_email || '',
         google_event_id: m.google_event_id || '', meet_link: m.meet_link || '',
         gerenteName: userList.find(u => u.id === m.gerente_id)?.name || '—',
+        gc_outcome: m.gc_outcome ?? null,
+        gc_outcome_notes: m.gc_outcome_notes ?? null,
+        agendado_por: m.agendado_por ?? null,
       })))
       setIsLoading(false)
     }
@@ -359,19 +398,40 @@ function GCContent() {
 
   async function completeTask(taskId: string) {
     setCompletingId(taskId)
+    const now = new Date().toISOString()
+    // Atualiza o estado imediatamente (otimista)
+    setTasks(prev => prev.map(t =>
+      t.id === taskId ? { ...t, status: 'concluida', completed_at: now, completed_by: user?.id ?? null } : t
+    ))
     const { error } = await supabase.from('gc_tasks').update({
-      status: 'concluida', completed_at: new Date().toISOString(), completed_by: user?.id,
+      status: 'concluida', completed_at: now, completed_by: user?.id,
     }).eq('id', taskId)
-    if (!error) await loadTasks()
+    if (error) {
+      // Rollback se falhou
+      setTasks(prev => prev.map(t =>
+        t.id === taskId ? { ...t, status: 'pendente', completed_at: null, completed_by: null } : t
+      ))
+      toast(error.message, 'error')
+    } else {
+      void logActivity(user!.id, user!.name, 'status', 'tarefa', taskId, `Concluiu tarefa`)
+    }
     setCompletingId(null)
   }
 
   async function reopenTask(taskId: string) {
     setCompletingId(taskId)
+    // Atualiza o estado imediatamente (otimista)
+    setTasks(prev => prev.map(t =>
+      t.id === taskId ? { ...t, status: 'pendente', completed_at: null, completed_by: null } : t
+    ))
     const { error } = await supabase.from('gc_tasks').update({
       status: 'pendente', completed_at: null, completed_by: null,
     }).eq('id', taskId)
-    if (!error) await loadTasks()
+    if (error) {
+      // Rollback se falhou
+      await loadTasks()
+      toast(error.message, 'error')
+    }
     setCompletingId(null)
   }
 
@@ -382,18 +442,20 @@ function GCContent() {
 
   // Ativações visíveis: admin vê tudo, gerente vê só as suas
   const visibleActs = useMemo(() => {
+    const q = search.toLowerCase()
     return activations.filter(a => {
       if (hasAnyRole(user, ['Admin'])) return true
       return a.gerente_id === user?.id
     })
     .filter(a => !filterGerente || a.gerente_id === filterGerente)
     .filter(a => !filterMonth  || a.date?.slice(0, 7) === filterMonth)
-  }, [activations, user, filterGerente, filterMonth])
+    .filter(a => !q || a.client.toLowerCase().includes(q) || a.email.toLowerCase().includes(q))
+  }, [activations, user, filterGerente, filterMonth, search])
 
-  const starterList    = visibleActs.filter(a => funil(a.faturamento_mensal) === 'Starter')
-  const growthList     = visibleActs.filter(a => funil(a.faturamento_mensal) === 'Growth')
-  const enterpriseList = visibleActs.filter(a => funil(a.faturamento_mensal) === 'Enterprise')
-  const semFunil       = visibleActs.filter(a => funil(a.faturamento_mensal) === null)
+  const starterList    = visibleActs.filter(a => funil(a.faturamento_mensal, a.gerente_id) === 'Starter')
+  const growthList     = visibleActs.filter(a => funil(a.faturamento_mensal, a.gerente_id) === 'Growth')
+  const enterpriseList = visibleActs.filter(a => funil(a.faturamento_mensal, a.gerente_id) === 'Enterprise')
+  const semFunil       = visibleActs.filter(a => funil(a.faturamento_mensal, a.gerente_id) === null)
 
   // Calendário
   const firstDay    = new Date(year, month, 1).getDay()
@@ -406,9 +468,10 @@ function GCContent() {
   const visibleMeetings = useMemo(() => {
     return meetings.filter(m => {
       if (hasAnyRole(user, ['Admin'])) return true
+      if (isSocialSelling) return true   // Social Selling vê todas as reuniões
       return m.gerente_id === user?.id
     })
-  }, [meetings, user])
+  }, [meetings, user, isSocialSelling])
 
   function getMeetingsForDay(day: number) {
     const dStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
@@ -420,15 +483,51 @@ function GCContent() {
     const novoGerente = gerentes.find(g => g.id === gerenteId)
     const { error } = await supabase.from('activations').update({ gerente_id: gerenteId || null }).eq('id', id)
     if (error) { toast(error.message, 'error'); return }
+    const act = activations.find(a => a.id === id)
     setActs(p => p.map(a => a.id === id ? { ...a, gerente_id: gerenteId || null } : a))
+
+    // Atualiza também todas as tarefas pendentes do cliente para o novo GC
+    if (gerenteId) {
+      await supabase.from('gc_tasks')
+        .update({ gerente_id: gerenteId })
+        .eq('activation_id', id)
+        .neq('status', 'concluida')
+      setTasks(prev => prev.map(t =>
+        t.activation_id === id && t.status !== 'concluida' ? { ...t, gerente_id: gerenteId } : t
+      ))
+    }
+
     toast(`Transferido para ${novoGerente?.name ?? 'sem gerente'} ✓`, 'success')
+    void logActivity(user!.id, user!.name, 'update', 'cliente', act?.client ?? id, `Transferiu ${act?.client ?? id} para GC ${novoGerente?.name ?? 'sem gerente'}`)
+
+    // Move o card no DataCrazy para o pipeline GC correto do novo responsável
+    if (act && gerenteId) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        void supabase.functions.invoke('sync-datacrazy', {
+          body: {
+            name:               act.client,
+            email:              act.email,
+            phone:              act.phone ?? null,
+            team_uuid:          null,
+            notes:              null,
+            image_urls:         [],
+            faturamento_mensal: act.faturamento_mensal ?? null,
+            channel:            null,
+            gc_gerente_id:      gerenteId,
+          },
+          headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined,
+        })
+      })
+    }
   }
 
   // ── Move card no Kanban ──────────────────────────────────────────────────
   async function moveKanban(id: string, status: string) {
+    const act = activations.find(a => a.id === id)
     const { error } = await supabase.from('activations').update({ gc_status: status }).eq('id', id)
     if (error) { toast(error.message, 'error'); return }
     setActs(p => p.map(a => a.id === id ? { ...a, gc_status: status } : a))
+    void logActivity(user!.id, user!.name, 'move', 'kanban', act?.client ?? id, `Moveu ${act?.client ?? id} para "${status}"`)
   }
 
   async function saveQuickMeeting() {
@@ -450,6 +549,7 @@ function GCContent() {
       client_email:  quickMeetClient.email,
       status:        'Agendada',
       notes:         '',
+      agendado_por:  user?.id ?? null,
     }
     const { data, error } = await supabase.from('followup_meetings').insert(row).select().single()
     setIsSaving(false)
@@ -460,9 +560,11 @@ function GCContent() {
       date: row.date, time: row.time, endTime: quickMeetForm.endTime,
       status: 'Agendada', notes: '', clientEmail: quickMeetClient.email,
       google_event_id: '', meet_link: '', gerenteName,
+      gc_outcome: null, gc_outcome_notes: null, agendado_por: user?.id ?? null,
     }
     setMeetings(p => [...p, newM])
     toast('Reunião agendada!', 'success')
+    void logActivity(user!.id, user!.name, 'create', 'reuniao', quickMeetClient.client, `Agendou reunião com ${quickMeetClient.client} em ${quickMeetForm.date}`)
     setQuickMeetClient(null)
     setQuickMeetForm({ date: '', time: '', endTime: '' })
 
@@ -497,8 +599,10 @@ function GCContent() {
   async function confirmWelcomeSent(id: string) {
     const { error } = await supabase.from('activations').update({ welcome_sent: true }).eq('id', id)
     if (error) { toast(error.message, 'error'); return }
+    const act = activations.find(a => a.id === id)
     setActs(p => p.map(a => a.id === id ? { ...a, welcome_sent: true } : a))
     toast('Mensagem de boas-vindas confirmada ✓', 'success')
+    void logActivity(user!.id, user!.name, 'status', 'cliente', act?.client ?? id, `Confirmou envio de boas-vindas para ${act?.client ?? id}`)
   }
 
   // ── Cria nova tarefa manualmente ─────────────────────────────────────────
@@ -549,6 +653,7 @@ function GCContent() {
     if (error) { toast(error.message, 'error'); return }
     setActs(p => p.map(a => a.id === modalClient.id ? { ...a, ...patch } : a))
     toast('Cliente atualizado!', 'success')
+    void logActivity(user!.id, user!.name, 'update', 'cliente', modalClient.client, `Editou dados de ${modalClient.client} (fat/gerente)`)
     setModalClient(null)
   }
 
@@ -580,6 +685,7 @@ function GCContent() {
         end_time: meetForm.endTime || null, gerente_id: meetForm.gerente_id,
         status: meetForm.status, notes: meetForm.notes, client_email: meetForm.clientEmail,
         activation_id: meetForm.activation_id || null,
+        agendado_por: user?.id ?? null,
       }
       const { data, error } = await supabase.from('followup_meetings').insert(row).select().single()
       setIsSaving(false)
@@ -588,7 +694,8 @@ function GCContent() {
         gerente_id: meetForm.gerente_id, title: meetForm.title, date: meetForm.date,
         time: meetForm.time, endTime: meetForm.endTime, status: meetForm.status,
         notes: meetForm.notes, clientEmail: meetForm.clientEmail,
-        google_event_id: '', meet_link: '', gerenteName }
+        google_event_id: '', meet_link: '', gerenteName,
+        gc_outcome: null, gc_outcome_notes: null, agendado_por: user?.id ?? null }
       setMeetings(p => [...p, newM])
       toast('Reunião agendada!', 'success')
 
@@ -640,6 +747,21 @@ function GCContent() {
     toast(`Status: ${status}`, 'success')
   }
 
+  async function saveOutcome() {
+    if (!outcomeModal) return
+    const { meetId, outcomeKey } = outcomeModal
+    const { error } = await supabase.from('followup_meetings').update({
+      gc_outcome: outcomeKey,
+      gc_outcome_notes: outcomeNotes || null,
+    }).eq('id', meetId)
+    if (error) { toast(error.message, 'error'); return }
+    setMeetings(p => p.map(m => m.id === meetId ? { ...m, gc_outcome: outcomeKey, gc_outcome_notes: outcomeNotes || null } : m))
+    setSheetMeet(prev => prev?.id === meetId ? { ...prev, gc_outcome: outcomeKey, gc_outcome_notes: outcomeNotes || null } : prev)
+    toast(`Resultado registrado: ${outcomeModal.label}`, 'success')
+    setOutcomeModal(null)
+    setOutcomeNotes('')
+  }
+
   function openNewMeet(clientEmail = '', activationId = '') {
     setEditMeet(null)
     setMeetForm({ ...EMPTY_MEET, clientEmail, activation_id: activationId, gerente_id: user?.role === 'Gerente de Contas' ? user.id : '' })
@@ -654,7 +776,7 @@ function GCContent() {
   }
 
   function ClientCard({ a }: { a: DbActivation }) {
-    const f = funil(a.faturamento_mensal)
+    const f = funil(a.faturamento_mensal, a.gerente_id)
     const color = f ? FUNIL_COLORS[f] : 'var(--border)'
     const closer = users.find(u => u.id === a.responsible)?.name || '—'
     const gerente = users.find(u => u.id === a.gerente_id)?.name
@@ -766,7 +888,16 @@ function GCContent() {
         {/* ── Cabeçalho ── */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
           <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-.02em' }}>Gerente de Contas</h1>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* Busca por nome */}
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar cliente..."
+              className="inp"
+              style={{ fontSize: 13, padding: '6px 12px', width: 200 }}
+            />
             {/* Filtro de mês */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <input
@@ -836,7 +967,9 @@ function GCContent() {
 
         {/* ── Tabs ── */}
         <div style={{ display: 'flex', gap: 4, background: 'var(--bg-card2)', borderRadius: 10, padding: 4, marginBottom: 20, width: 'fit-content' }}>
-          {([['kanban','Kanban'],['funis','Funis de Clientes'],['agenda','Agenda'],['tarefas','Tarefas']] as const).map(([k,l]) => (
+          {([['kanban','Kanban'],['funis','Funis de Clientes'],['agenda','Agenda'],['tarefas','Tarefas']] as const)
+            .filter(([k]) => !isSocialSelling || k === 'agenda')
+            .map(([k,l]) => (
             <button key={k} onClick={() => setTab(k)} style={{
               padding: '7px 18px', borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
               background: tab === k ? 'var(--action)' : 'transparent',
@@ -873,7 +1006,7 @@ function GCContent() {
                         </div>
                       )}
                       {cards.map(a => {
-                        const f      = funil(a.faturamento_mensal)
+                        const f      = funil(a.faturamento_mensal, a.gerente_id)
                         const fColor = f ? FUNIL_COLORS[f] : 'var(--border)'
                         const closer = users.find(u => u.id === a.responsible)?.name || '—'
                         const gerente = users.find(u => u.id === a.gerente_id)?.name
@@ -1091,10 +1224,10 @@ function GCContent() {
                         border: isToday ? '1px solid var(--action)' : '1px solid transparent' }}>
                       <div style={{ fontSize: 12, fontWeight: isToday ? 800 : 500, color: isToday ? 'var(--action)' : 'var(--text)', marginBottom: 2 }}>{day}</div>
                       {dayMeets.slice(0,2).map(m => {
-                        const color = MEET_STATUS_COLORS[m.status] || 'var(--action)'
+                        const color = gerenteColor(m.gerente_id)
                         return (
                           <div key={m.id} onClick={e => { e.stopPropagation(); setSheetMeet(m) }}
-                            style={{ fontSize: 10, borderRadius: 4, padding: '2px 4px', marginBottom: 2, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', background: `color-mix(in srgb, ${color} 20%, transparent)`, border: `1px solid ${color}`, color }}>
+                            style={{ fontSize: 10, borderRadius: 4, padding: '2px 4px', marginBottom: 2, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', background: `color-mix(in srgb, ${color} 22%, transparent)`, border: `1px solid ${color}`, color }}>
                             {m.time} {m.title}
                           </div>
                         )
@@ -1122,13 +1255,13 @@ function GCContent() {
                   {visibleMeetings.filter(m => m.date === selectedDate).sort((a,b) => a.time.localeCompare(b.time)).length === 0
                     ? <div style={{ fontSize: 13, color: 'var(--text2)' }}>Nenhuma reunião neste dia.</div>
                     : visibleMeetings.filter(m => m.date === selectedDate).sort((a,b) => a.time.localeCompare(b.time)).map(m => {
-                        const color = MEET_STATUS_COLORS[m.status] || 'var(--action)'
+                        const color = gerenteColor(m.gerente_id)
                         return (
                           <div key={m.id} onClick={() => setSheetMeet(m)}
                             style={{ padding: 12, background: 'var(--bg-card2)', borderRadius: 10, cursor: 'pointer', borderLeft: `3px solid ${color}` }}>
                             <div style={{ fontWeight: 600, fontSize: 13 }}>{m.title}</div>
                             <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>{m.time}{m.endTime ? ` – ${m.endTime}` : ''}</div>
-                            <div style={{ fontSize: 11, color, fontWeight: 600 }}>{m.gerenteName.split(' ')[0]}</div>
+                            <div style={{ fontSize: 11, color, fontWeight: 700 }}>{m.gerenteName.split(' ')[0]}</div>
                           </div>
                         )
                       })
@@ -1282,12 +1415,26 @@ function GCContent() {
                   <div style={{ fontWeight: 700, marginTop: 4 }}>{sheetMeet.time}{sheetMeet.endTime ? ` – ${sheetMeet.endTime}` : ''}</div>
                 </div>
               </div>
-              <div style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: 14 }}>
-                <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>Gerente</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Avatar name={sheetMeet.gerenteName} size={32} />
-                  <span style={{ fontWeight: 600 }}>{sheetMeet.gerenteName}</span>
+              <div style={{ display: 'grid', gridTemplateColumns: sheetMeet.agendado_por ? '1fr 1fr' : '1fr', gap: 10 }}>
+                <div style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: 14 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>Gerente</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <Avatar name={sheetMeet.gerenteName} size={28} />
+                    <span style={{ fontWeight: 600 }}>{sheetMeet.gerenteName.split(' ')[0]}</span>
+                  </div>
                 </div>
+                {sheetMeet.agendado_por && (() => {
+                  const agendador = users.find(u => u.id === sheetMeet.agendado_por)
+                  return agendador ? (
+                    <div style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: 14 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>Agendado por</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <Avatar name={agendador.name} size={28} />
+                        <span style={{ fontWeight: 600 }}>{agendador.name.split(' ')[0]}</span>
+                      </div>
+                    </div>
+                  ) : null
+                })()}
               </div>
               {sheetMeet.notes && (
                 <div style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: 14 }}>
@@ -1303,6 +1450,36 @@ function GCContent() {
                   <Button size="sm" variant="warning"     icon={Clock}       onClick={() => updateStatus(sheetMeet.id, 'No-show')}>No-show</Button>
                 </div>
               </div>
+
+              {/* Resultado da Reunião GC */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Resultado</div>
+                {sheetMeet.gc_outcome && (() => {
+                  const o = GC_OUTCOMES.find(x => x.key === sheetMeet.gc_outcome)
+                  return o ? (
+                    <div style={{ padding: '8px 12px', borderRadius: 8, background: `${o.color}18`, border: `1px solid ${o.color}`, color: o.color, fontWeight: 700, fontSize: 13 }}>
+                      ✓ {o.label}
+                      {sheetMeet.gc_outcome_notes && <div style={{ fontWeight: 400, fontSize: 12, marginTop: 4, color: 'var(--text2)' }}>{sheetMeet.gc_outcome_notes}</div>}
+                    </div>
+                  ) : null
+                })()}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {GC_OUTCOMES.map(o => (
+                    <button key={o.key}
+                      onClick={() => { setOutcomeModal({ meetId: sheetMeet.id, outcomeKey: o.key, label: o.label, color: o.color }); setOutcomeNotes(sheetMeet.gc_outcome_notes || '') }}
+                      style={{
+                        padding: '8px 14px', borderRadius: 8, border: `1px solid ${o.key === sheetMeet.gc_outcome ? o.color : 'var(--border)'}`,
+                        background: o.key === sheetMeet.gc_outcome ? `${o.color}18` : 'var(--bg-card2)',
+                        color: o.key === sheetMeet.gc_outcome ? o.color : 'var(--text)',
+                        fontWeight: o.key === sheetMeet.gc_outcome ? 700 : 500,
+                        fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
+                      }}>
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div style={{ display: 'flex', gap: 8 }}>
                 <div style={{ flex: 1 }}><Button variant="secondary" icon={Phone} onClick={() => openEditMeet(sheetMeet)}>Editar</Button></div>
                 <div style={{ flex: 1 }}><Button variant="destructive" icon={Trash2} onClick={() => deleteMeeting(sheetMeet)}>Apagar</Button></div>
@@ -1310,6 +1487,40 @@ function GCContent() {
             </div>
           )}
         </Sheet>
+
+        {/* ── Modal: Resultado da Reunião GC ── */}
+        {outcomeModal && (
+          <div onClick={() => setOutcomeModal(null)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.65)', zIndex: 9100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+            <div onClick={e => e.stopPropagation()}
+              style={{ background: 'var(--bg-card)', border: `2px solid ${outcomeModal.color}`, borderRadius: 16, width: '100%', maxWidth: 480, padding: 28, boxShadow: '0 24px 60px rgba(0,0,0,.6)' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.07em', color: outcomeModal.color, marginBottom: 6 }}>Resultado da Reunião</div>
+              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 20 }}>{outcomeModal.label}</div>
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 8 }}>Observações <span style={{ fontWeight: 400 }}>(opcional)</span></div>
+                <textarea
+                  className="inp"
+                  rows={4}
+                  value={outcomeNotes}
+                  onChange={e => setOutcomeNotes(e.target.value)}
+                  placeholder="Descreva o que aconteceu na reunião…"
+                  style={{ resize: 'vertical', fontSize: 13, width: '100%' }}
+                  autoFocus
+                />
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={saveOutcome}
+                  style={{ flex: 1, padding: '11px', borderRadius: 10, border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700, fontSize: 14, background: outcomeModal.color, color: '#fff' }}>
+                  Confirmar
+                </button>
+                <button onClick={() => { setOutcomeModal(null); setOutcomeNotes('') }}
+                  style={{ padding: '11px 18px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-card2)', color: 'var(--text2)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13 }}>
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── Modal: Sincronizar CRM ── */}
         {modalBulkSync && (

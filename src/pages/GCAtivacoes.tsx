@@ -16,17 +16,20 @@ import { capitalize, formatDate, CHANNEL_COLORS } from '@/lib/utils'
 import type { ActivationChannel } from '@/lib/supabase/database.types'
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subWeeks, subMonths, subDays } from 'date-fns'
 
+const CAMPANHAS = ['Low Ticket', 'Taxa adicional', 'Iphone', 'Churn Antigos', 'Churn Recuperado'] as const
+
 type DbActivation = {
   id: string; client: string; email: string | null; phone: string | null
   channel: string; responsible: string; date: string; time: string | null
   sdr_id: string | null; sdr_nome: string | null; indicado_por: string | null
-  gc_ativacao: boolean
+  gc_ativacao: boolean; campanha: string | null; faturamento_mensal: number | null
+  image_urls: string[] | null
 }
 type DbUser  = { id: string; name: string; email: string | null; role: string; team_id: string | null }
 type DbTeam  = { id: string; name: string }
 type AuthUser = { id: string; name: string; role: string; team_id: string | null }
 
-const CHANNELS: ActivationChannel[] = ['Inbound', 'Outbound', 'Indicação']
+const CHANNELS: ActivationChannel[] = ['Inbound', 'Outbound', 'Indicação', 'Churn', 'Prevenção de Churn']
 
 const GERENTE_POR_FUNIL: Record<string, string> = {
   Starter:    '0bfe1dcb-9827-4a2a-8850-8343c53985f5',
@@ -40,7 +43,7 @@ function gerentePorFaturamento(fat: number | null): string | null {
   return GERENTE_POR_FUNIL.Enterprise
 }
 
-const EMPTY_FORM = { client: '', email: '', channel: 'Inbound', responsible: '', date: '', phone: '+55 ', notes: '', images: [] as File[], faturamento_mensal: '' }
+const EMPTY_FORM = { client: '', email: '', channel: 'Inbound', responsible: '', date: '', phone: '+55 ', notes: '', images: [] as File[], faturamento_mensal: '', campanha: '' }
 const PER_PAGE = 5
 
 const DEFAULT_RANGE: DateRange = {
@@ -116,7 +119,7 @@ function GCAtivacoesCont({ isAdmin, currentUser }: { isAdmin: boolean; currentUs
       const [{ data: acts, error: ae }, { data: usrs }, { data: tms }] = await Promise.all([
         supabase
           .from('activations')
-          .select('id,client,email,phone,channel,responsible,date,time,sdr_id,sdr_nome,indicado_por')
+          .select('id,client,email,phone,channel,responsible,date,time,sdr_id,sdr_nome,indicado_por,campanha,faturamento_mensal,image_urls')
           .gte('date', dateRange.startDate)
           .lte('date', dateRange.endDate)
           .eq('gc_ativacao', true)
@@ -191,9 +194,7 @@ function GCAtivacoesCont({ isAdmin, currentUser }: { isAdmin: boolean; currentUs
     if (!form.responsible)        missing.push('Responsável')
     if (!form.date)               missing.push('Data de Ativação')
     if (!form.phone || form.phone === '+55 ') missing.push('Telefone')
-    if (!form.faturamento_mensal) missing.push('Faturamento Mensal')
     if (!form.notes)              missing.push('Notas')
-    if (form.images.length === 0) missing.push('Arquivos / Imagens')
     if (missing.length > 0) { toast(`Campos obrigatórios: ${missing.join(', ')}`, 'error'); return }
     setIsSaving(true)
 
@@ -215,7 +216,10 @@ function GCAtivacoesCont({ isAdmin, currentUser }: { isAdmin: boolean; currentUs
         channel: form.channel as ActivationChannel, responsible: form.responsible, date: form.date,
         notes: form.notes || null,
         faturamento_mensal: form.faturamento_mensal ? parseFloat(form.faturamento_mensal.replace(/\./g,'').replace(',','.')) || null : null,
-        gerente_id: gerentePorFaturamento(form.faturamento_mensal ? parseFloat(form.faturamento_mensal) || null : null),
+        gerente_id: ['Churn', 'Prevenção de Churn'].includes(form.channel)
+          ? null
+          : (form.responsible || null),
+        campanha: form.campanha || null,
         ...(imageUrls.length > 0 ? { image_urls: imageUrls } : {}),
       }
       const { error } = await supabase.from('activations').update(patch).eq('id', modalEdit.id)
@@ -224,6 +228,25 @@ function GCAtivacoesCont({ isAdmin, currentUser }: { isAdmin: boolean; currentUs
       setActivations(p => p.map(a => a.id === modalEdit.id ? { ...a, ...patch } : a))
       toast('Ativação atualizada!', 'success')
       setModalEdit(null)
+
+      // Sincroniza notas e arquivos no DataCrazy (responsável = GC logado)
+      if (form.notes || imageUrls.length > 0 || form.faturamento_mensal) {
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          void supabase.functions.invoke('sync-datacrazy', {
+            body: {
+              name:               capitalize(form.client),
+              email:              form.email,
+              phone:              form.phone || null,
+              team_uuid:          null, // GC não tem time de closer — pula etapa do pipeline
+              notes:              form.notes || null,
+              image_urls:         imageUrls,
+              faturamento_mensal: form.faturamento_mensal ? parseFloat(form.faturamento_mensal.replace(/\./g,'').replace(',','.')) || null : null,
+              channel:            form.channel || null,
+            },
+            headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined,
+          })
+        })
+      }
     } else {
       const emailSanitized = form.email.trim().toLowerCase()
       const { data: existing } = await supabase.from('activations').select('id').eq('email', emailSanitized).maybeSingle()
@@ -253,7 +276,11 @@ function GCAtivacoesCont({ isAdmin, currentUser }: { isAdmin: boolean; currentUs
         notes: form.notes || null,
         image_urls: imageUrls,
         faturamento_mensal: form.faturamento_mensal ? parseFloat(form.faturamento_mensal.replace(/\./g,'').replace(',','.')) || null : null,
-        gerente_id: gerentePorFaturamento(form.faturamento_mensal ? parseFloat(form.faturamento_mensal) || null : null),
+        // GC que ativou = gerente responsável pela esteira (Churn não entra no Kanban)
+        gerente_id: ['Churn', 'Prevenção de Churn'].includes(form.channel)
+          ? null
+          : (form.responsible || null),
+        campanha: form.campanha || null,
       }
       const { data, error } = await supabase.from('activations').insert(row).select().single()
       setIsSaving(false)
@@ -272,20 +299,26 @@ function GCAtivacoesCont({ isAdmin, currentUser }: { isAdmin: boolean; currentUs
         const authHeaders = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined
         void supabase.functions.invoke('datacrazy-webhook', {
           body: {
-            ativacao_id: (data as DbActivation).id, closer_id: form.responsible,
+            ativacao_id: (data as DbActivation).id,
+            closer_id:   form.responsible,          // GC responsável pela ativação
             closer_email: responsibleUser?.email ?? null,
             time_id: null, data_fechamento: fechamentoISO, canal: form.channel,
             cliente_nome: capitalize(form.client), cliente_email: form.email,
             cliente_telefone: form.phone || null, sdr_id: null, sdr_email: null,
+            gc_ativacao: true,
           },
           headers: authHeaders,
         })
         void supabase.functions.invoke('sync-datacrazy', {
           body: {
-            name: capitalize(form.client), email: form.email, phone: form.phone || null,
-            team_uuid: responsibleUser?.team_id ?? null, notes: form.notes || null, image_urls: imageUrls,
-            faturamento_mensal: form.faturamento_mensal ? parseFloat(form.faturamento_mensal) || null : null,
-            channel: form.channel || null,
+            name:               capitalize(form.client),
+            email:              form.email,
+            phone:              form.phone || null,
+            team_uuid:          null, // GC não tem time de closer — pula etapa do pipeline Closer
+            notes:              form.notes || null,
+            image_urls:         imageUrls,
+            faturamento_mensal: form.faturamento_mensal ? parseFloat(form.faturamento_mensal.replace(/\./g,'').replace(',','.')) || null : null,
+            channel:            form.channel || null,
           },
           headers: authHeaders,
         })
@@ -321,6 +354,16 @@ function GCAtivacoesCont({ isAdmin, currentUser }: { isAdmin: boolean; currentUs
             options={gcUsers.map(u => ({ value: u.id, label: u.name }))} placeholder="Selecione o GC…" />
         </Field>
       </div>
+      {/* Campanha */}
+      <Field label="Campanha">
+        <Sel
+          value={form.campanha}
+          onChange={v => setForm(p => ({ ...p, campanha: v }))}
+          options={CAMPANHAS.map(c => ({ value: c, label: c }))}
+          placeholder="Selecione a campanha (opcional)"
+        />
+      </Field>
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field label="Data de Ativação" required>
           <input className="inp" type="date" value={form.date} onChange={setF('date')} />
@@ -329,7 +372,7 @@ function GCAtivacoesCont({ isAdmin, currentUser }: { isAdmin: boolean; currentUs
           <input className="inp" value={form.phone} onChange={setF('phone')} placeholder="+55 11 99999-0000" />
         </Field>
       </div>
-      <Field label="Faturamento Mensal Esperado (R$)" required>
+      <Field label="Faturamento Mensal Esperado (R$)">
         <input className="inp" type="number" value={form.faturamento_mensal}
           onChange={e => setForm(p => ({ ...p, faturamento_mensal: e.target.value }))} placeholder="Ex: 75000" />
         {form.faturamento_mensal && (() => {
@@ -345,7 +388,7 @@ function GCAtivacoesCont({ isAdmin, currentUser }: { isAdmin: boolean; currentUs
           placeholder="Observações sobre o cliente, contrato, produto…"
           style={{ resize: 'vertical', fontSize: 13 }} />
       </Field>
-      <Field label="Arquivos / Imagens" required>
+      <Field label="Arquivos / Imagens">
         <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           gap: 6, padding: '16px 12px', border: '2px dashed var(--border)', borderRadius: 10,
           cursor: 'pointer', background: 'var(--bg-card2)', transition: 'border-color .15s' }}
@@ -529,7 +572,10 @@ function GCAtivacoesCont({ isAdmin, currentUser }: { isAdmin: boolean; currentUs
                           onClick={() => {
                             setForm({ ...EMPTY_FORM, client: a.client, email: a.email || '',
                               phone: a.phone || '', channel: a.channel, responsible: a.responsible,
-                              date: a.date, notes: (a as any).notes || '', images: [] })
+                              date: a.date, notes: (a as any).notes || '',
+                              faturamento_mensal: a.faturamento_mensal != null ? String(a.faturamento_mensal) : '',
+                              campanha: a.campanha || '',
+                              images: [] })
                             setModalEdit(a)
                           }}
                           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--action)', padding: 4, borderRadius: 6 }}>

@@ -64,13 +64,13 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
   const [gerente,   setGerente]   = useState('todos')
   const [mes,       setMes]       = useState(() => new Date().toISOString().slice(0, 7))
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load(false, mes) }, [mes])
   useEffect(() => { loadDailyTpv() }, [mes, gerente, gcNome])
 
-  async function load(forceRefresh = false) {
+  async function load(forceRefresh = false, refMonth?: string) {
     setIsLoading(true)
     const [clientes, { data: nd }] = await Promise.all([
-      getMbClientes(forceRefresh),
+      getMbClientes(forceRefresh, refMonth),
       supabase.from('carteira_notas').select('*'),
     ])
     setClientes(clientes as Cliente[])
@@ -115,7 +115,7 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
     setIsRefresh(true)
     invalidateMbCache()
     await supabase.functions.invoke('calcular-tpv', { body: { limite: 30 } })
-    await Promise.all([load(true), loadDailyTpv()])
+    await Promise.all([load(true, mes), loadDailyTpv()])
     setIsRefresh(false)
   }
 
