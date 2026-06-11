@@ -313,11 +313,21 @@ serve(async (req) => {
         }
 
         if (tagIds.length > 0) {
-          const patchRes = await fetch(`${BASE}/leads/${leadId}`, {
-            method: 'PATCH', headers: h,
-            body: JSON.stringify({ tags: tagIds.map(id => ({ id })) }),
-          })
-          console.log(`[sync-datacrazy] Tags adicionadas (${tagsToAdd.join(', ')}): ${patchRes.status}`)
+          // Busca tags atuais do lead para preservar as pendentes (não sobrescrever)
+          const leadRes  = await fetch(`${BASE}/leads/${leadId}`, { headers: h })
+          const leadData = await leadRes.json()
+          const currentTagIds: string[] = (leadData?.tags ?? []).map((t: any) => t.id).filter(Boolean)
+
+          const mergedTagIds = [...new Set([...currentTagIds, ...tagIds])]
+          if (mergedTagIds.length > currentTagIds.length) {
+            const patchRes = await fetch(`${BASE}/leads/${leadId}`, {
+              method: 'PATCH', headers: h,
+              body: JSON.stringify({ tags: mergedTagIds.map(id => ({ id })) }),
+            })
+            console.log(`[sync-datacrazy] Tags adicionadas (${tagsToAdd.join(', ')}), mantendo pendentes: ${patchRes.status}`)
+          } else {
+            console.log(`[sync-datacrazy] Tags (${tagsToAdd.join(', ')}) já presentes no lead, nada a fazer`)
+          }
         }
       }
     } catch (tagErr) {
