@@ -72,33 +72,45 @@ export function invalidateMbCache() {
   } catch {}
 }
 
-// ─── Clientes da carteira (mb-search sem parâmetros) ─────────────────────────
-const KEY_CLIENTES = 'mb_clientes'
+// ─── Clientes da carteira (mb-search com ref_month opcional) ─────────────────
+function keyClientes(refMonth?: string) {
+  return refMonth ? `mb_clientes_${refMonth}` : 'mb_clientes'
+}
 
-export async function getMbClientes(forceRefresh = false): Promise<unknown[]> {
-  if (!forceRefresh && isFresh(KEY_CLIENTES)) {
-    return getFromCache<unknown[]>(KEY_CLIENTES)
+export async function getMbClientes(forceRefresh = false, refMonth?: string): Promise<unknown[]> {
+  const key = keyClientes(refMonth)
+  if (!forceRefresh && isFresh(key)) {
+    return getFromCache<unknown[]>(key)
   }
-  const { data } = await supabase.functions.invoke('mb-search', { body: {} })
+  const body: Record<string, string> = {}
+  if (refMonth) body.ref_month = refMonth
+  const { data } = await supabase.functions.invoke('mb-search', { body })
   const clientes = data?.clientes ?? []
-  setCache(KEY_CLIENTES, clientes)
+  setCache(key, clientes)
   return clientes
 }
 
 // ─── TPV por lista de emails (mb-search com { emails }) ─────────────────────
-const KEY_TPV_EMAILS = 'mb_tpv_emails'
+// Chave inclui hash simples da lista para evitar colisão entre conjuntos de clientes diferentes
+function keyTpvEmails(emails: string[]): string {
+  const sorted = [...emails].sort()
+  // hash leve: soma dos char codes dos primeiros 20 emails
+  const h = sorted.slice(0, 20).join('').split('').reduce((s, c) => s + c.charCodeAt(0), 0)
+  return `mb_tpv_emails_${sorted.length}_${h}`
+}
 
 export async function getMbTpvByEmails(
   emails: string[],
   forceRefresh = false,
 ): Promise<Record<string, { tpv_mes: number; ultima_venda: string | null }>> {
   if (!emails.length) return {}
-  if (!forceRefresh && isFresh(KEY_TPV_EMAILS)) {
-    return getFromCache<Record<string, { tpv_mes: number; ultima_venda: string | null }>>(KEY_TPV_EMAILS)
+  const key = keyTpvEmails(emails)
+  if (!forceRefresh && isFresh(key)) {
+    return getFromCache<Record<string, { tpv_mes: number; ultima_venda: string | null }>>(key)
   }
   const { data } = await supabase.functions.invoke('mb-search', { body: { emails } })
   const tpv = (data?.tpv ?? {}) as Record<string, { tpv_mes: number; ultima_venda: string | null }>
-  setCache(KEY_TPV_EMAILS, tpv)
+  setCache(key, tpv)
   return tpv
 }
 
@@ -108,15 +120,29 @@ function keyDailyTpv(mes: string, amIds: number[]) {
 }
 
 // ─── TPV por ativação — janela customizada (ativação → +30 dias) ─────────────
-// Não usa cache pois cada chamada tem conjunto específico de datas/ativações
+// Divide em lotes de 8 para evitar timeout da Edge Function / Metabase
+const BATCH_SIZE = 8
+
 export async function getMbTpvPorAtivacao(
   activacoes: { id: string; email: string; start: string; end: string }[]
 ): Promise<Record<string, number>> {
   if (!activacoes.length) return {}
-  const { data } = await supabase.functions.invoke('mb-search', {
-    body: { tpv_por_ativacao: true, activacoes },
-  })
-  return (data?.tpv ?? {}) as Record<string, number>
+
+  const batches: (typeof activacoes)[] = []
+  for (let i = 0; i < activacoes.length; i += BATCH_SIZE) {
+    batches.push(activacoes.slice(i, i + BATCH_SIZE))
+  }
+
+  const results = await Promise.all(
+    batches.map(batch =>
+      supabase.functions
+        .invoke('mb-search', { body: { tpv_por_ativacao: true, activacoes: batch } })
+        .then(({ data }) => (data?.tpv ?? {}) as Record<string, number>)
+        .catch(() => ({}) as Record<string, number>)
+    )
+  )
+
+  return Object.assign({}, ...results) as Record<string, number>
 }
 
 export async function getMbDailyTpv(

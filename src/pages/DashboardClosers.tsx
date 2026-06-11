@@ -11,6 +11,7 @@ import { BarChartV } from '@/components/ui/charts/BarChartV'
 import { DonutChart } from '@/components/ui/charts/DonutChart'
 import { supabase } from '@/lib/supabase/client'
 import { GOALS, metaColor } from '@/lib/goals'
+import { getMbTpvByEmails, invalidateMbCache } from '@/lib/mbCache'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const DATA_INICIO_REGRA = '2026-04-01'
@@ -42,8 +43,16 @@ interface RawCall {
   title: string | null
   client_email: string | null
   responsible: string | null
+  date: string
+  time: string | null
+  status: string
+  ativado: boolean | null
   motivo_nao_ativacao: string | null
+  updated_at: string | null
 }
+
+// alias para compatibilidade
+type ConvertedCall = RawCall
 
 interface RawUser {
   id: string
@@ -89,12 +98,10 @@ function getRange(preset: Preset, customFrom: string, customTo: string): { inici
   if (preset === '7d')   return { inicio: sub(6),     fim: fmt(today), label: 'Últimos 7 dias' }
   if (preset === '30d')  return { inicio: sub(29),    fim: fmt(today), label: 'Últimos 30 dias' }
   if (preset === 'mes') {
-    const mes = fmt(today).slice(0, 7)
-    return {
-      inicio: `${mes}-01`,
-      fim: `${mes}-31`,
-      label: new Date(mes + '-01').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }),
-    }
+    const y = today.getFullYear(), mo = today.getMonth() + 1
+    const inicio = `${y}-${String(mo).padStart(2,'0')}-01`
+    const fim    = fmt(new Date(y, mo, 0))
+    return { inicio, fim, label: new Date(inicio + 'T12:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) }
   }
   const from = customFrom || fmt(today)
   const to   = customTo   || fmt(today)
@@ -174,9 +181,14 @@ function DashboardClosersContent() {
   const [activations, setActivations] = useState<RawActivation[]>([])
   const [users,       setUsers]       = useState<RawUser[]>([])
   const [teams,       setTeams]       = useState<RawTeam[]>([])
-  const [tpvCache,    setTpvCache]    = useState<RawTpvCache[]>([])
-  const [calls,       setCalls]       = useState<RawCall[]>([])
-  const [isLoading,   setIsLoading]   = useState(true)
+  const [tpvCache,       setTpvCache]       = useState<RawTpvCache[]>([])
+  const [calls,          setCalls]          = useState<RawCall[]>([])
+  const [convertedCalls, setConvertedCalls] = useState<ConvertedCall[]>([])
+  const [tpvMesMap,      setTpvMesMap]      = useState<Record<string, number>>({})
+  const [isLoading,      setIsLoading]      = useState(true)
+  const [isRefreshing,   setIsRefreshing]   = useState(false)
+  // Modal de conversão
+  const [convModal, setConvModal] = useState<{ closerId: string; name: string } | null>(null)
 
   // ── Load data ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -188,12 +200,14 @@ function DashboardClosersContent() {
         { data: tms },
         { data: tpv },
         { data: cls },
+        { data: conv },
       ] = await Promise.all([
         supabase
           .from('activations')
           .select('id,client,email,responsible,date,channel,faturamento_mensal,gerente_id,gc_status,welcome_sent')
           .gte('date', inicio)
-          .lte('date', fim),
+          .lte('date', fim)
+          .or('gc_ativacao.is.null,gc_ativacao.is.false'),
         supabase
           .from('users')
           .select('id,name,email,role,team_id,active'),
@@ -206,16 +220,31 @@ function DashboardClosersContent() {
           .gte('data_fechamento', DATA_INICIO_REGRA),
         supabase
           .from('calls')
-          .select('id,title,client_email,responsible,motivo_nao_ativacao')
+          .select('id,title,client_email,responsible,date,time,status,ativado,motivo_nao_ativacao,updated_at')
           .gte('date', inicio)
-          .lte('date', fim)
-          .not('motivo_nao_ativacao', 'is', null),
+          .lte('date', fim),
+        // conv placeholder — usamos cls para tudo
+        Promise.resolve({ data: [] }),
       ])
-      setActivations((acts ?? []) as RawActivation[])
+      const actList = (acts ?? []) as RawActivation[]
+      setActivations(actList)
       setUsers((usrs ?? []) as RawUser[])
       setTeams((tms ?? []) as RawTeam[])
       setTpvCache((tpv ?? []) as RawTpvCache[])
-      setCalls((cls ?? []) as RawCall[])
+      const allCalls = (cls ?? []) as RawCall[]
+      setCalls(allCalls)
+      setConvertedCalls(allCalls.filter(c => c.ativado === true))
+
+      // Busca TPV do mês atual para todos os emails ativados no período
+      const emails = [...new Set(actList.map(a => a.email).filter(Boolean) as string[])]
+      if (emails.length > 0) {
+        getMbTpvByEmails(emails).then(tpvData => {
+          const map: Record<string, number> = {}
+          Object.entries(tpvData).forEach(([email, v]) => { map[email.toLowerCase()] = v.tpv_mes })
+          setTpvMesMap(map)
+        }).catch(() => {})
+      }
+
       setIsLoading(false)
     }
     load()
@@ -238,10 +267,9 @@ function DashboardClosersContent() {
       const ativacoes = myActs.length
       const ticketMedio = ativacoes > 0 ? fatPrevisto / ativacoes : 0
 
-      // TPV: sum tpv_30_dias where closer_email matches
-      const myTpv = tpvCache.filter(t => t.closer_email === closer.email)
-      const tpv30d = myTpv.reduce((s, t) => s + (t.tpv_30_dias ?? 0), 0)
-      const bonus  = myTpv.reduce((s, t) => s + (t.bonus_closer ?? 0), 0)
+      // TPV Mês Atual: soma o tpv_mes dos clientes ativados por esse closer no período
+      const tpv30d = myActs.reduce((s, a) => s + (tpvMesMap[(a.email ?? '').toLowerCase()] ?? 0), 0)
+      const bonus  = 0 // bônus removido da tabela
 
       return {
         id: closer.id,
@@ -256,17 +284,33 @@ function DashboardClosersContent() {
         bonus,
       }
     }).sort((a, b) => b.ativacoes - a.ativacoes)
-  }, [closers, activations, tpvCache, teamMap])
+  }, [closers, activations, tpvMesMap, teamMap])
+
+  // ── Métricas de calls por closer ────────────────────────────────────────────
+  const callStatsByCloser = useMemo(() => {
+    const map: Record<string, { agendadas: number; realizadas: number; emAtendimento: number; noshow: number; canceladas: number; ativadas: number }> = {}
+    calls.forEach(c => {
+      if (!c.responsible) return
+      if (!map[c.responsible]) map[c.responsible] = { agendadas: 0, realizadas: 0, emAtendimento: 0, noshow: 0, canceladas: 0, ativadas: 0 }
+      map[c.responsible].agendadas++
+      if (c.status === 'Realizada')       map[c.responsible].realizadas++
+      if (c.status === 'Em Atendimento')  map[c.responsible].emAtendimento++
+      if (c.status === 'No-show')         map[c.responsible].noshow++
+      if (c.status === 'Cancelada')       map[c.responsible].canceladas++
+      if (c.ativado === true)             map[c.responsible].ativadas++
+    })
+    return map
+  }, [calls])
 
   // ── KPI aggregates ──────────────────────────────────────────────────────────
   const kpi = useMemo(() => {
     const totalAtivacoes   = activations.length
     const fatTotal         = activations.reduce((s, a) => s + (a.faturamento_mensal ?? 0), 0)
     const ticketMedioGeral = totalAtivacoes > 0 ? fatTotal / totalAtivacoes : 0
-    const tpvTotal30d      = tpvCache.reduce((s, t) => s + (t.tpv_30_dias ?? 0), 0)
-    const bonusTotal       = tpvCache.reduce((s, t) => s + (t.bonus_closer ?? 0), 0)
+    const tpvTotal30d      = closerRows.reduce((s, r) => s + r.tpv30d, 0)
+    const bonusTotal       = 0
     return { totalAtivacoes, fatTotal, ticketMedioGeral, tpvTotal30d, bonusTotal }
-  }, [activations, tpvCache])
+  }, [activations, closerRows])
 
   // ── Chart: ativações por dia ────────────────────────────────────────────────
   const ativacoesPorDia = useMemo(() => {
@@ -334,12 +378,12 @@ function DashboardClosersContent() {
 
   // ── % Fat vs TPV ────────────────────────────────────────────────────────────
   function pctFatVsTpv(fat: number, tpv: number): string {
-    if (tpv <= 0) return '—'
-    return `${Math.round((fat / tpv) * 100)}%`
+    if (fat <= 0) return '—'
+    return `${Math.round((tpv / fat) * 100)}%`
   }
   function pctColor(fat: number, tpv: number): string {
-    if (tpv <= 0) return 'var(--text2)'
-    const r = fat / tpv
+    if (fat <= 0) return 'var(--text2)'
+    const r = tpv / fat
     if (r >= 0.8) return '#34C759'
     if (r >= 0.5) return '#F59E0B'
     return '#FF3B30'
@@ -429,7 +473,7 @@ function DashboardClosersContent() {
             valueSize={22}
           />
           <KpiCard
-            label="TPV Total 30d"
+            label="TPV Mês Atual"
             value={BRL(kpi.tpvTotal30d)}
             icon={TrendingUp}
             color="#BF5AF2"
@@ -547,9 +591,9 @@ function DashboardClosersContent() {
                   <th style={{ textAlign: 'right' }}>Ativações</th>
                   <th style={{ textAlign: 'right' }}>Fat. Previsto</th>
                   <th style={{ textAlign: 'right' }}>Ticket Médio</th>
-                  <th style={{ textAlign: 'right' }}>TPV 30d</th>
-                  <th style={{ textAlign: 'right' }}>Bônus</th>
+                  <th style={{ textAlign: 'right' }}>TPV Mês</th>
                   <th style={{ textAlign: 'right' }}>% Fat. vs TPV</th>
+                  <th style={{ textAlign: 'right' }}>Conversões</th>
                 </tr>
               </thead>
               <tbody>
@@ -599,11 +643,19 @@ function DashboardClosersContent() {
                     <td style={{ textAlign: 'right', fontWeight: 700, color: r.tpv30d > 0 ? '#BF5AF2' : 'var(--text2)' }}>
                       {r.tpv30d > 0 ? BRL(r.tpv30d) : '—'}
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: r.bonus > 0 ? '#34C759' : 'var(--text2)' }}>
-                      {r.bonus > 0 ? BRL(r.bonus) : '—'}
-                    </td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: pctColor(r.fatPrevisto, r.tpv30d) }}>
                       {pctFatVsTpv(r.fatPrevisto, r.tpv30d)}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      {(() => {
+                        const cnt = convertedCalls.filter(c => c.responsible === r.id).length
+                        return cnt > 0 ? (
+                          <button onClick={() => setConvModal({ closerId: r.id, name: r.name })}
+                            style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, border: '1px solid #34C759', background: '#34C75918', color: '#34C759', cursor: 'pointer', fontFamily: 'inherit' }}>
+                            {cnt} convertido{cnt !== 1 ? 's' : ''}
+                          </button>
+                        ) : <span style={{ color: 'var(--text2)', fontSize: 12 }}>—</span>
+                      })()}
                     </td>
                   </tr>
                 ))}
@@ -611,6 +663,67 @@ function DashboardClosersContent() {
             </table>
           </div>
         </div>
+
+        {/* ── Conversão da Agenda por Closer ───────────────────────────── */}
+        {calls.length > 0 && (
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden', marginBottom: 16 }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>Conversão da Agenda</div>
+              <span style={{ fontSize: 12, color: 'var(--text2)' }}>{calls.length} calls no período</span>
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: 'var(--bg-card2)' }}>
+                    {['Closer','Agendadas','Realizadas','Em Atend.','No-show','Canceladas','Ativados','Taxa Show','Taxa Conv.'].map(h => (
+                      <th key={h} style={{ padding: '10px 16px', textAlign: h === 'Closer' ? 'left' : 'right', fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {closers.filter(c => callStatsByCloser[c.id]).map(c => {
+                    const s = callStatsByCloser[c.id]
+                    const taxaShow = s.agendadas > 0 ? Math.round(s.realizadas / s.agendadas * 100) : 0
+                    const taxaConv = s.realizadas > 0 ? Math.round(s.ativadas / s.realizadas * 100) : 0
+                    const pctColor = (v: number) => v >= 80 ? 'var(--green)' : v >= 50 ? 'var(--orange)' : 'var(--red)'
+                    return (
+                      <tr key={c.id}
+                        onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-card2)')}
+                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                        <td style={{ padding: '12px 16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Avatar name={c.name} size={28} />
+                            <div>
+                              <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name.split(' ')[0]}</div>
+                              <div style={{ fontSize: 11, color: 'var(--text2)' }}>{teams.find(t => t.id === c.team_id)?.name ?? '—'}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600 }}>{s.agendadas}</td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right', color: 'var(--green)', fontWeight: 700 }}>{s.realizadas}</td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right', color: s.emAtendimento > 0 ? 'var(--cyan)' : 'var(--text2)', fontWeight: s.emAtendimento > 0 ? 700 : 400 }}>{s.emAtendimento}</td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right', color: s.noshow > 0 ? 'var(--orange)' : 'var(--text2)' }}>{s.noshow}</td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right', color: s.canceladas > 0 ? 'var(--red)' : 'var(--text2)' }}>{s.canceladas}</td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                          <button onClick={() => setConvModal({ closerId: c.id, name: c.name })}
+                            style={{ fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 20, border: '1px solid #34C759', background: '#34C75918', color: '#34C759', cursor: s.ativadas > 0 ? 'pointer' : 'default', fontFamily: 'inherit' }}>
+                            {s.ativadas}
+                          </button>
+                        </td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                          <span style={{ fontWeight: 700, color: pctColor(taxaShow) }}>{taxaShow}%</span>
+                        </td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                          <span style={{ fontWeight: 700, color: pctColor(taxaConv) }}>{taxaConv}%</span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* ── Motivos de Não Ativação ──────────────────────────────────── */}
         {naoAtivados.length > 0 && (
@@ -625,7 +738,7 @@ function DashboardClosersContent() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: 'var(--bg-card2)' }}>
-                    {['Cliente', 'Email', 'Closer', 'Motivo'].map(h => (
+                    {['Cliente', 'Email', 'Closer', 'Atualizado', 'Motivo'].map(h => (
                       <th key={h} style={{
                         padding: '10px 16px', textAlign: 'left',
                         fontSize: 11, fontWeight: 700, color: 'var(--text2)',
@@ -655,6 +768,11 @@ function DashboardClosersContent() {
                               {closer.name.split(' ')[0]}
                             </span>
                           ) : <span style={{ color: 'var(--text2)' }}>—</span>}
+                        </td>
+                        <td style={{ padding: '12px 16px', whiteSpace: 'nowrap', color: 'var(--text2)', fontSize: 12 }}>
+                          {c.updated_at
+                            ? new Date(c.updated_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
+                            : '—'}
                         </td>
                         <td style={{ padding: '12px 16px', color: 'var(--text)', lineHeight: 1.5 }}>
                           {c.motivo_nao_ativacao}
@@ -699,6 +817,64 @@ function DashboardClosersContent() {
         </div>
 
       </div>
+      {/* ── Modal: Conversões da Agenda ── */}
+      {convModal && (() => {
+        const myConv = convertedCalls
+          .filter(c => c.responsible === convModal.closerId)
+          .sort((a, b) => a.date.localeCompare(b.date) || (a.time || '').localeCompare(b.time || ''))
+        return (
+          <div onClick={() => setConvModal(null)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.65)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+            <div onClick={e => e.stopPropagation()}
+              style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, width: '100%', maxWidth: 640, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 60px rgba(0,0,0,.6)', overflow: 'hidden' }}>
+
+              {/* Header */}
+              <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'color-mix(in srgb, #34C759 8%, var(--bg-card2))' }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.07em', color: '#34C759', marginBottom: 4 }}>Conversões da Agenda</div>
+                  <div style={{ fontWeight: 800, fontSize: 16 }}>{convModal.name}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>{rangeLabel} · {myConv.length} cliente{myConv.length !== 1 ? 's' : ''} convertido{myConv.length !== 1 ? 's' : ''}</div>
+                </div>
+                <button onClick={() => setConvModal(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text2)', fontSize: 22, lineHeight: 1, padding: 4 }}>×</button>
+              </div>
+
+              {/* Lista */}
+              <div style={{ overflowY: 'auto', flex: 1 }}>
+                {myConv.length === 0 ? (
+                  <div style={{ padding: 48, textAlign: 'center', color: 'var(--text2)', fontSize: 14 }}>Nenhuma conversão no período.</div>
+                ) : myConv.map((c, i) => (
+                  <div key={c.id} style={{ padding: '12px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 14 }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-card2)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#34C759', flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {c.title || c.client_email || `Call #${i + 1}`}
+                      </div>
+                      {c.client_email && c.title && (
+                        <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 1 }}>{c.client_email}</div>
+                      )}
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ fontSize: 12, color: 'var(--text2)' }}>
+                        {new Date(c.date + 'T12:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                        {c.time ? ` · ${c.time.slice(0,5)}` : ''}
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: '#34C759', background: '#34C75918', padding: '2px 8px', borderRadius: 20 }}>✓ Ativado</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Footer */}
+              <div style={{ padding: '12px 24px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end' }}>
+                <button onClick={() => setConvModal(null)} style={{ padding: '8px 20px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card2)', color: 'var(--text2)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13 }}>Fechar</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </>
   )
