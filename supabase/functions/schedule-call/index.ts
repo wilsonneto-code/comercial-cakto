@@ -226,6 +226,46 @@ async function handleBackfillBatch(body: any) {
   return json({ results })
 }
 
+// Cria cópias "somente leitura" (sem convidados, sem nova conferência) de um lote
+// de calls na agenda pessoal de um usuário (ex.: dar visibilidade a um Sócio).
+async function handleSyncToUser(body: any) {
+  const { targetEmail, items } = body as {
+    targetEmail: string
+    items: Array<{
+      id: string; title: string; date: string; time: string; end_time?: string
+      closerName?: string; closerEmail?: string | null
+      clientEmail?: string | null; notes?: string | null; meetLink?: string | null
+    }>
+  }
+  if (!targetEmail) return err500('targetEmail obrigatório.')
+
+  const tokens = await getGCTokens(targetEmail)
+  if (!tokens.refreshToken) return err500(`${targetEmail} não tem Google Calendar conectado.`)
+
+  const accessToken = await getAccessToken(tokens.refreshToken)
+  const calendarId  = tokens.calendarId || 'primary'
+  const base    = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?sendUpdates=none`
+  const authHdr = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }
+
+  const results: { id: string; ok: boolean; eventId?: string; error?: string }[] = []
+  for (const it of (items ?? [])) {
+    try {
+      const event: any = buildEvent(it)
+      delete event.attendees
+      delete event.conferenceData
+      if (it.meetLink) event.description = [event.description, `\nLink do Meet: ${it.meetLink}`].filter(Boolean).join('\n')
+
+      const res = await fetch(base, { method: 'POST', headers: authHdr, body: JSON.stringify(event) })
+      if (!res.ok) { results.push({ id: it.id, ok: false, error: await res.text() }); continue }
+      const created = await res.json()
+      results.push({ id: it.id, ok: true, eventId: created.id })
+    } catch (e) {
+      results.push({ id: it.id, ok: false, error: String(e) })
+    }
+  }
+  return json({ results })
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
 
@@ -234,6 +274,7 @@ serve(async (req) => {
     const action = body.action ?? 'create'
 
     if (action === 'backfill-batch') return await handleBackfillBatch(body)
+    if (action === 'sync-to-user')   return await handleSyncToUser(body)
 
     const closerEmail = body.closerEmail ?? ''
     const sdrEmail    = body.sdrEmail ?? ''
