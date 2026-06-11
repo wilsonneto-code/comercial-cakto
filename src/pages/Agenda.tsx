@@ -1214,12 +1214,10 @@ function AgendaContent() {
                 )}
               </div>
 
-              {sheetCall.campanha && (
-                <div style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: 14 }}>
-                  <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>Campanha de Captação</div>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{sheetCall.campanha}</div>
-                </div>
-              )}
+              <div style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: 14 }}>
+                <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>Campanha de Captação</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: sheetCall.campanha ? undefined : 'var(--text2)' }}>{sheetCall.campanha || 'Não definida'}</div>
+              </div>
 
               {sheetCall.notes && (
                 <div style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: 14 }}>
