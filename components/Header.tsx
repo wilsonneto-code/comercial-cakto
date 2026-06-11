@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sun, Moon, ChevronDown, Tag, Settings, LogOut, Leaf, Menu } from 'lucide-react';
+import { Sun, Moon, ChevronDown, Tag, Settings, LogOut, Menu } from 'lucide-react';
 import { useTheme } from './ui/ThemeProvider';
 import { Avatar } from './ui/Avatar';
 import { Dropdown } from './ui/Dropdown';
@@ -61,13 +61,20 @@ export function Header() {
         style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'none',
           border: 'none', cursor: 'pointer', flexShrink: 0, padding: '4px 6px', borderRadius: 8 }}>
         <div style={{
-          width: 30, height: 30, borderRadius: 8,
+          width: 32, height: 32, borderRadius: 8,
           background: 'linear-gradient(145deg, #3D7044 0%, #2F5733 100%)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           boxShadow: '0 2px 10px rgba(47,87,51,.45)',
           flexShrink: 0,
         }}>
-          <Leaf size={14} color="#E2CFB7" strokeWidth={2.2} />
+          {/* Cakto cactus logo */}
+          <svg width="18" height="18" viewBox="0 0 100 120" fill="white">
+            <rect x="38" y="8"  width="24" height="104" rx="12" />
+            <rect x="8"  y="48" width="46" height="20"  rx="10" />
+            <rect x="8"  y="16" width="20" height="52"  rx="10" />
+            <rect x="46" y="60" width="46" height="20"  rx="10" />
+            <rect x="72" y="28" width="20" height="52"  rx="10" />
+          </svg>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0, lineHeight: 1 }}>
           <span style={{
