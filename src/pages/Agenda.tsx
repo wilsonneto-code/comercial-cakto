@@ -2,8 +2,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { ChevronLeft, ChevronRight, ChevronDown, Plus, Phone, Calendar, CheckCircle, XCircle, Clock, Loader2, ExternalLink, Video, Trash2 } from 'lucide-react';
-import { useAuth } from '@/lib/authContext';
+import { ChevronLeft, ChevronRight, ChevronDown, Plus, Phone, Calendar, CheckCircle, XCircle, Clock, Loader2, ExternalLink, Video, Trash2, RefreshCw } from 'lucide-react';
+import { useAuth, hasAnyRole } from '@/lib/authContext';
 import { Header } from '@/components/Header';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -119,6 +119,8 @@ function AgendaContent() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving]   = useState(false);
   const [gcConnected, setGcConnected] = useState<boolean | null>(null);
+  const [isSyncingOld, setIsSyncingOld] = useState(false);
+  const isAdmin = hasAnyRole(user, ['Admin']);
 
   const [modal, setModal]             = useState(false);
   const [sheetCall, setSheetCall]     = useState<CallItem | null>(null);
@@ -386,8 +388,7 @@ function AgendaContent() {
         },
       }).then(async ({ data: fnData, error: fnErr }) => {
         if (fnErr) { toast('Call salva, mas falhou no Google Calendar', 'error'); return; }
-        const { eventId, meetLink, skipped } = (fnData || {}) as { eventId?: string; meetLink?: string; skipped?: boolean };
-        if (skipped) { toast('Google Calendar não conectado para este closer', 'warning'); return; }
+        const { eventId, meetLink } = (fnData || {}) as { eventId?: string; meetLink?: string };
         if (eventId) {
           await supabase.from('calls').update({ google_event_id: eventId, meet_link: meetLink ?? '' }).eq('id', newCall.id);
           setCalls(p => p.map(c => c.id === newCall.id ? { ...c, google_event_id: eventId, meet_link: meetLink ?? '' } : c));
@@ -395,6 +396,43 @@ function AgendaContent() {
         }
       });
     }
+  }
+
+  // Sincroniza calls antigas (sem google_event_id) com o calendário Cakto
+  async function syncOldCallsToCalendar() {
+    const missing = calls.filter(c => !c.google_event_id);
+    if (missing.length === 0) { toast('Todas as calls já estão sincronizadas.', 'success'); return; }
+    setIsSyncingOld(true);
+
+    const items = missing.map(c => {
+      const responsibleUser = users.find(u => u.id === c.responsibleId);
+      const sdrUser = c.sdrNome ? users.find(u => u.name === c.sdrNome) : null;
+      return {
+        id: c.id, title: c.title, date: c.date, time: c.time || '09:00', end_time: c.endTime,
+        closerName: responsibleUser?.name || c.responsible, closerEmail: responsibleUser?.email || '',
+        sdrEmail: sdrUser?.email || '',
+        clientEmail: c.clientEmail, notes: c.notes,
+      };
+    });
+
+    const { data, error } = await supabase.functions.invoke('schedule-call', {
+      body: { action: 'backfill-batch', items },
+    });
+    if (error) { toast('Falha ao sincronizar: ' + error.message, 'error'); setIsSyncingOld(false); return; }
+
+    const results = (data?.results ?? []) as Array<{ id: string; ok: boolean; eventId?: string; meetLink?: string | null; error?: string }>;
+    let okCount = 0;
+    for (const r of results) {
+      if (!r.ok || !r.eventId) continue;
+      const { error: upErr } = await supabase.from('calls')
+        .update({ google_event_id: r.eventId, meet_link: r.meetLink ?? '' }).eq('id', r.id);
+      if (!upErr) {
+        okCount++;
+        setCalls(p => p.map(c => c.id === r.id ? { ...c, google_event_id: r.eventId!, meet_link: r.meetLink ?? '' } : c));
+      }
+    }
+    setIsSyncingOld(false);
+    toast(`${okCount}/${missing.length} calls sincronizadas com o Google Calendar (Cakto) ✓`, okCount > 0 ? 'success' : 'error');
   }
 
   async function deleteCall(call: CallItem) {
@@ -756,6 +794,17 @@ function AgendaContent() {
               )}
               {gcConnected === null && (
                 <div style={{ fontSize: 12, color: 'var(--text2)' }}>Verificando...</div>
+              )}
+              {isAdmin && (
+                <button onClick={syncOldCallsToCalendar} disabled={isSyncingOld} style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', width: '100%', justifyContent: 'center',
+                  marginTop: 10, borderRadius: 8, border: '1px solid var(--border)', cursor: isSyncingOld ? 'default' : 'pointer',
+                  background: 'var(--bg-card2)', color: 'var(--text2)', fontWeight: 600, fontSize: 12, fontFamily: 'inherit',
+                  opacity: isSyncingOld ? .6 : 1,
+                }}>
+                  {isSyncingOld ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={13} />}
+                  {isSyncingOld ? 'Sincronizando...' : 'Sincronizar calls antigas (Cakto)'}
+                </button>
               )}
             </div>
           </div>
