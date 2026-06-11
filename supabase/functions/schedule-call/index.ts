@@ -18,6 +18,10 @@ const CORS = {
 const ADMIN_EMAIL        = 'wilsonneto@cakto.com.br'
 const CAKTO_CALENDAR_ID  = Deno.env.get('GOOGLE_CALENDAR_ID') || 'primary'
 
+// Convidado "invisível": toda call nova ganha uma cópia na agenda pessoal deste
+// usuário, sem aparecer na lista de convidados do evento original (Cakto/closer/cliente).
+const HIDDEN_GUEST_EMAIL = 'caio@cakto.com.br'
+
 const json   = (s: unknown) => new Response(JSON.stringify(s), { headers: { ...CORS, 'Content-Type': 'application/json' } })
 const err500 = (msg: string) => new Response(JSON.stringify({ error: msg }), { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } })
 
@@ -145,6 +149,34 @@ function buildEvent(input: {
   }
 }
 
+// Remove convidados/conferência do evento e referencia o Meet existente na descrição —
+// usado para criar cópias "somente leitura" na agenda pessoal de alguém.
+function toInvisibleCopy(event: Record<string, unknown>, meetLink: string | null) {
+  const copy: any = { ...event }
+  delete copy.attendees
+  delete copy.conferenceData
+  copy.description = [event.description, meetLink ? `\nLink do Meet: ${meetLink}` : ''].filter(Boolean).join('\n')
+  return copy
+}
+
+// Cria, de forma best-effort, uma cópia "somente leitura" do evento na agenda
+// pessoal de targetEmail (se conectado) — não aparece como convidado no evento original.
+async function createInvisibleCopy(targetEmail: string, event: Record<string, unknown>, meetLink: string | null) {
+  try {
+    const tokens = await getGCTokens(targetEmail)
+    if (!tokens.refreshToken) return
+    const accessToken = await getAccessToken(tokens.refreshToken)
+    const calendarId  = tokens.calendarId || 'primary'
+    const res = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?sendUpdates=none`,
+      { method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(toInvisibleCopy(event, meetLink)) }
+    )
+    if (!res.ok) console.warn('[schedule-call] Falha ao criar cópia invisível:', targetEmail, await res.text())
+  } catch (e) {
+    console.warn('[schedule-call] Falha ao criar cópia invisível:', targetEmail, String(e))
+  }
+}
+
 // Cria evento em um calendário sem gerar nova conferência (cópia)
 async function createCopyEvent(
   calendarId: string,
@@ -250,11 +282,7 @@ async function handleSyncToUser(body: any) {
   const results: { id: string; ok: boolean; eventId?: string; error?: string }[] = []
   for (const it of (items ?? [])) {
     try {
-      const event: any = buildEvent(it)
-      delete event.attendees
-      delete event.conferenceData
-      if (it.meetLink) event.description = [event.description, `\nLink do Meet: ${it.meetLink}`].filter(Boolean).join('\n')
-
+      const event = toInvisibleCopy(buildEvent(it), it.meetLink ?? null)
       const res = await fetch(base, { method: 'POST', headers: authHdr, body: JSON.stringify(event) })
       if (!res.ok) { results.push({ id: it.id, ok: false, error: await res.text() }); continue }
       const created = await res.json()
@@ -323,6 +351,8 @@ serve(async (req) => {
 
     // Cópias best-effort nos calendários pessoais do closer/SDR
     await createPersonalCopies(closerEmail, sdrEmail, event, meetLink)
+    // Cópia "invisível" para o convidado oculto (ex.: Sócio acompanhando a agenda)
+    await createInvisibleCopy(HIDDEN_GUEST_EMAIL, event, meetLink)
 
     return json({ eventId: created.id, htmlLink: created.htmlLink, meetLink })
 
