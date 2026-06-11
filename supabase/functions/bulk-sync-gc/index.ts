@@ -287,14 +287,22 @@ serve(async (req) => {
         }
         entry.leadId = leadId
 
-        // ── 4. Adiciona tag GC ──────────────────────────────────────────────
+        // ── 4. Adiciona tag GC (preserva as demais tags do lead) ─────────────
         const tagId = gcTagIds[tier]
         if (tagId) {
-          const tagRes = await dcFetch(`${BASE}/leads/${leadId}`, {
-            method: 'PATCH', body: JSON.stringify({ tags: [{ id: tagId }] }),
-          }, h)
-          if (!tagRes.ok) entry.steps.push(`tag: HTTP ${tagRes.status}`)
-          else entry.tagAdded = tier
+          const lRes  = await dcFetch(`${BASE}/leads/${leadId}`, {}, h)
+          const lData = await lRes.json()
+          const currentTagIds: string[] = (lData?.tags ?? []).map((t: any) => t.id).filter(Boolean)
+
+          if (!currentTagIds.includes(tagId)) {
+            const tagRes = await dcFetch(`${BASE}/leads/${leadId}`, {
+              method: 'PATCH', body: JSON.stringify({ tags: [...currentTagIds, tagId].map(id => ({ id })) }),
+            }, h)
+            if (!tagRes.ok) entry.steps.push(`tag: HTTP ${tagRes.status}`)
+            else entry.tagAdded = tier
+          } else {
+            entry.tagAdded = `${tier} (já presente)`
+          }
         }
 
         // ── 5. Verifica/cria negócio no pipeline GC ─────────────────────────
