@@ -17,7 +17,7 @@ import { capitalize, formatDate, CHANNEL_COLORS, isSDRRole } from '@/lib/utils'
 import type { ActivationChannel } from '@/lib/supabase/database.types'
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subWeeks, subMonths, subDays } from 'date-fns'
 
-const CAMPANHAS = ['Low Ticket', 'Taxa adicional', 'Iphone', 'Churn Antigos', 'Churn Recuperado'] as const
+const CAMPANHAS = ['Low Ticket', 'Taxa adicional', 'Iphone', 'Churn Antigos', 'Churn Recuperado', 'Outbound/Indicação'] as const
 
 type DbActivation = {
   id: string; client: string; email: string | null; phone: string | null
@@ -236,6 +236,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
     if (!form.phone || form.phone === '+55 ') missing.push('Telefone')
     if (!form.faturamento_mensal) missing.push('Faturamento Mensal')
     if (!form.notes)             missing.push('Notas')
+    if (!form.campanha)          missing.push('Campanha')
     // Imagens obrigatórias só no cadastro novo; na edição já existem arquivos anteriores
     if (!modalEdit && form.images.length === 0) missing.push('Arquivos / Imagens')
     // SDR é opcional — closer pode salvar sem SDR
@@ -614,12 +615,12 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
       </Field>
 
       {/* Campanha */}
-      <Field label="Campanha">
+      <Field label="Campanha" required>
         <Sel
           value={form.campanha}
           onChange={v => setForm(p => ({ ...p, campanha: v }))}
           options={CAMPANHAS.map(c => ({ value: c, label: c }))}
-          placeholder="Selecione a campanha (opcional)"
+          placeholder="Selecione a campanha"
         />
       </Field>
 
