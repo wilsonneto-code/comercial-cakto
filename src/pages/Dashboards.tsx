@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   BarChart2, User, TrendingUp, ChevronLeft, LayoutDashboard,
-  DollarSign, Phone, Target, Award, CheckCircle, AlertCircle, Loader2, Users,
+  DollarSign, Phone, Target, Award, CheckCircle, AlertCircle, Loader2, Users, ClipboardList,
 } from 'lucide-react';
 import { useAuth, hasAnyRole } from '@/lib/authContext';
 import { useToast } from '@/components/ui/Toast';
@@ -21,8 +21,10 @@ import { DashBuilder } from './DashBuilder';
 import { DashGCContent } from './DashboardGC';
 import { DashSDRContent } from './DashboardSDR';
 import RelatoriosAdmin from './RelatoriosAdmin';
+import ActivityLogs from './ActivityLogs';
+import { isSDRRole } from '@/lib/utils';
 
-type DashView = 'grid' | 'sdr' | 'gerente' | 'builder' | 'relatorios';
+type DashView = 'grid' | 'sdr' | 'gerente' | 'builder' | 'relatorios' | 'logs';
 type DbUser = { id: string; name: string; role: string; team_id: string | null; active: boolean }
 type DbActivation = { responsible: string; date: string; channel: string }
 
@@ -85,10 +87,12 @@ function DashboardsContent() {
   if (view === 'gerente')    return <DashGCContent   onBack={() => setView('grid')} />;
   if (view === 'builder')    return <DashBuilder     onBack={() => setView('grid')} />;
   if (view === 'relatorios') return <RelatoriosAdmin onBack={() => setView('grid')} />;
+  if (view === 'logs')       return <ActivityLogs    onBack={() => setView('grid')} />;
 
   const panelCards = [
-    { key: 'relatorios' as DashView, title: 'Relatórios Gerais', desc: 'Visão completa de todos os módulos: ativações, calls, reuniões, carteiras, pagamentos e auditoria.', icon: BarChart2,  color: '#EF4444', disabled: false, navigate: undefined },
-    { key: 'pagamentos' as DashView, title: 'Pagamentos',        desc: 'Gestão de pagamentos, comissões e bônus da equipe.',                                                  icon: DollarSign, color: '#22C55E', disabled: false, navigate: '/pagamentos' },
+    { key: 'relatorios' as DashView, title: 'Relatórios Gerais',    desc: 'Visão completa de todos os módulos: ativações, calls, reuniões, carteiras, pagamentos e auditoria.', icon: BarChart2,     color: '#EF4444', disabled: false, navigate: undefined },
+    { key: 'pagamentos' as DashView, title: 'Pagamentos',           desc: 'Gestão de pagamentos, comissões e bônus da equipe.',                                                  icon: DollarSign,   color: '#22C55E', disabled: false, navigate: '/pagamentos' },
+    ...(isAdmin ? [{ key: 'logs' as DashView, title: 'Log de Atividades', desc: 'Histórico de todas as ações realizadas pelos usuários: criações, edições e movimentações.', icon: ClipboardList, color: '#60A5FA', disabled: false, navigate: undefined }] : []),
   ];
 
   // Time 02 visível apenas para admins nos painéis
@@ -241,7 +245,7 @@ function DashSDR({ onBack }: { onBack: () => void }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const sdrs = useMemo(() => users.filter(u => u.role === 'SDR'), [users]);
+  const sdrs = useMemo(() => users.filter(u => isSDRRole(u.role)), [users]);
 
   const ranking = useMemo(() => {
     const counts: Record<string, number> = {};

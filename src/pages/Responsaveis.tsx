@@ -28,14 +28,14 @@ type DbUser = {
   setor: string | null
 }
 
-const COMMERCIAL_ROLES: string[] = ['SDR', 'Closer', 'Gerente de Contas', 'Head Comercial', 'Sócio', 'Admin']
+const COMMERCIAL_ROLES: string[] = ['SDR', 'Social Selling', 'Closer', 'Gerente de Contas', 'Head Comercial', 'Sócio', 'Admin']
 
 type DbTeam = {
   id: string
   name: string
 }
 
-const ROLES: UserRole[] = ['SDR', 'Closer', 'Gerente de Contas', 'Head Comercial', 'Sócio', 'Colaborador', 'Admin'];
+const ROLES: UserRole[] = ['SDR', 'Social Selling', 'Closer', 'Gerente de Contas', 'Head Comercial', 'Sócio', 'Colaborador', 'Admin'];
 
 export default function ResponsaveisPage() {
   const { user, loading } = useAuth();

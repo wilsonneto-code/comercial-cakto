@@ -40,10 +40,17 @@ export function clamp(v: number, min: number, max: number) {
   return Math.min(max, Math.max(min, v));
 }
 
+// Roles que se comportam como SDR
+export const SDR_ROLES = ['SDR', 'Social Selling'] as const
+export type SDRRole = typeof SDR_ROLES[number]
+export const isSDRRole = (role: string | null | undefined): boolean =>
+  SDR_ROLES.includes(role as SDRRole)
+
 export const ROLE_COLORS: Record<string, string> = {
   'Sócio':             'var(--gold)',
   'Closer':            'var(--purple)',
   'SDR':               'var(--action)',
+  'Social Selling':    'var(--cyan)',
   'Gerente de Contas': 'var(--orange)',
   'Head Comercial':    'var(--pink)',
   'Admin':             'var(--text2)',

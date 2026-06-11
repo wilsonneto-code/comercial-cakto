@@ -10,7 +10,7 @@ import { Sel } from '@/components/ui/Field'
 import { BarChartV } from '@/components/ui/charts/BarChartV'
 import { DateFilter, DateRange } from '@/components/ui/DateFilter'
 import { supabase } from '@/lib/supabase/client'
-import { ROLE_COLORS } from '@/lib/utils'
+import { ROLE_COLORS, isSDRRole } from '@/lib/utils'
 import { format, startOfMonth, endOfMonth } from 'date-fns'
 
 type DbUser = { id: string; name: string; role: string; team_id: string | null; active: boolean }
@@ -47,7 +47,7 @@ export default function Ranking() {
 
   // Perfil determina qual aba é visível
   const isCloser  = user?.role === 'Closer'
-  const isSdr     = user?.role === 'SDR'
+  const isSdr     = isSDRRole(user?.role)
   const isAdmin   = ['Admin', 'Gerente de Contas', 'Supervisor', 'Head Comercial'].includes(user?.role ?? '')
   const defaultView: 'closers' | 'sdr' = isSdr ? 'sdr' : 'closers'
   const [viewMode, setViewMode] = useState<'closers' | 'sdr'>(defaultView)
@@ -121,7 +121,7 @@ export default function Ranking() {
     activations.forEach(a => { if (a.sdr_id) actCounts[a.sdr_id] = (actCounts[a.sdr_id] || 0) + 1 })
 
     return users
-      .filter(u => u.role === 'SDR')
+      .filter(u => isSDRRole(u.role))
       .filter(u => !filterTeam || teams.find(t => t.id === u.team_id)?.name === filterTeam)
       .map(u => {
         const atv        = actCounts[u.id] || 0

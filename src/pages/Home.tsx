@@ -9,6 +9,7 @@ import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { supabase } from '@/lib/supabase/client'
 import { GOALS, metaColor } from '@/lib/goals'
+import { isSDRRole } from '@/lib/utils'
 
 type AuditLog   = { id: string; user_name: string; action: string; module: string; created_at: string }
 type WebhookLog = { id: string; ativacao_id: string | null; status: string; tentativas: number; erro: string | null; created_at: string }
@@ -105,7 +106,7 @@ export default function Home() {
       })
     }
 
-    if (role === 'SDR') {
+    if (isSDRRole(role)) {
       const mesInicio = todayStr.slice(0, 7) + '-01'
       Promise.all([
         supabase.from('calls').select('id,status,date,sdr_nome,ativado').eq('date', todayStr),
@@ -123,7 +124,7 @@ export default function Home() {
           .eq('status', 'pendente').lte('due_date', todayStr).order('due_date').limit(50),
         supabase.from('calls').select('id,title,date,time,status,responsible,sdr_nome')
           .eq('date', todayStr).order('time'),
-        supabase.from('users').select('id,name,role').in('role', ['Closer', 'SDR', 'Gerente de Contas']),
+        supabase.from('users').select('id,name,role').in('role', ['Closer', 'SDR', 'Social Selling', 'Gerente de Contas']),
       ]).then(([{ data: tasks }, { data: calls }, { data: users }]) => {
         if (tasks) setSocioGcTasks(tasks as GcTaskSummary[])
         if (calls) setSocioCalls(calls as CallSummary[])
@@ -154,7 +155,7 @@ export default function Home() {
 
   const isAdmin  = user.role === 'Admin'
   const isCloser = user.role === 'Closer'
-  const isSdr    = user.role === 'SDR'
+  const isSdr    = isSDRRole(user.role)
   const isGC     = user.role === 'Gerente de Contas'
   const isSocio  = user.role === 'Sócio'
   const firstName = user.name?.split(' ')[0] || 'Usuário'
@@ -553,7 +554,7 @@ export default function Home() {
           const gcToday    = socioGcTasks.filter(t => t.due_date === today2)
 
           const closers = socioUsers.filter(u => u.role === 'Closer')
-          const sdrs    = socioUsers.filter(u => u.role === 'SDR')
+          const sdrs    = socioUsers.filter(u => isSDRRole(u.role))
           const gcs     = socioUsers.filter(u => u.role === 'Gerente de Contas')
 
           const callsAgendadas  = socioCalls.filter(c => c.status === 'Agendada')

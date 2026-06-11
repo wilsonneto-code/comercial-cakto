@@ -29,7 +29,7 @@ export async function getMembrosDoTime(timeId: string) {
     .from('users')
     .select('id, name, email, role')
     .eq('team_id', teamUuid)
-    .in('role', ['SDR', 'Closer', 'Gerente de Contas'])
+    .in('role', ['SDR', 'Social Selling', 'Closer', 'Gerente de Contas'])
 
   return data ?? []
 }
