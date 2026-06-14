@@ -24,6 +24,7 @@ async function runSQL(mbUrl: string, mbKey: string, sql: string) {
   return {
     cols: data?.data?.cols?.map((c: any) => c.name) ?? [],
     rows: data?.data?.rows ?? [],
+    error: data?.error ?? null,
   }
 }
 
@@ -58,7 +59,8 @@ serve(async (req) => {
       GROUP BY DATE(p."paidAt")
       ORDER BY dia
     `
-    const { rows } = await runSQL(MB_URL, MB_KEY, sql)
+    const { rows, error } = await runSQL(MB_URL, MB_KEY, sql)
+    if (error) return json({ daily: null, error })
     const daily: Record<string, number> = {}
     rows.forEach((r: any[]) => {
       if (r[0]) daily[String(r[0]).slice(0, 10)] = Number(r[1] ?? 0)

@@ -158,6 +158,6 @@ export async function getMbDailyTpv(
     body: { daily_tpv: true, month: mes, ...(amIds.length ? { account_manager_ids: amIds } : {}) },
   })
   const daily = data?.daily ?? null
-  setCache(key, daily)
+  if (daily) setCache(key, daily) // não cacheia falha transitória do Metabase
   return daily
 }
