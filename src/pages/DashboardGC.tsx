@@ -7,7 +7,7 @@ import { getMbClientes, getMbDailyTpv, invalidateMbCache } from '@/lib/mbCache'
 import { DonutChart } from '@/components/ui/charts/DonutChart'
 import { BarChartH } from '@/components/ui/charts/BarChartH'
 import { LineAreaChart } from '@/components/ui/charts/LineAreaChart'
-import { TrendingUp, Users, DollarSign, AlertTriangle, CheckCircle, MessageSquare, RefreshCw, ChevronLeft } from 'lucide-react'
+import { TrendingUp, Users, DollarSign, AlertTriangle, CheckCircle, MessageSquare, RefreshCw, ChevronLeft, Activity } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { GOALS, metaColor } from '@/lib/goals'
 
@@ -20,6 +20,16 @@ interface Nota {
   email: string; motivo: string; observacao: string
   proxima_acao: string; data_contato: string | null
 }
+interface GcActivation {
+  id: string; channel: string; faturamento_mensal: number | null; responsible: string
+}
+
+const GC_TIPOS: { key: string; label: string; color: string }[] = [
+  { key: 'Churn',              label: 'Churn',              color: '#FF3B30' },
+  { key: 'Outbound',           label: 'Outbound',           color: '#2997FF' },
+  { key: 'Indicação',          label: 'Indicação',          color: '#34C759' },
+  { key: 'Prevenção de Churn', label: 'Prevenção de Churn', color: '#FF9F0A' },
+]
 
 const BRL  = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 const PCT  = (v: number) => `${v.toFixed(1)}%`
@@ -63,9 +73,17 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
   const [isRefresh, setIsRefresh] = useState(false)
   const [gerente,   setGerente]   = useState('todos')
   const [mes,       setMes]       = useState(() => new Date().toISOString().slice(0, 7))
+  const [gcUsers,   setGcUsers]   = useState<{ id: string; name: string }[]>([])
+  const [gcActs,    setGcActs]    = useState<GcActivation[]>([])
+  const [gcActsTpv, setGcActsTpv] = useState<Record<string, number>>({})
 
   useEffect(() => { load(false, mes) }, [mes])
   useEffect(() => { loadDailyTpv() }, [mes, gerente, gcNome])
+  useEffect(() => {
+    supabase.from('users').select('id,name').eq('role', 'Gerente de Contas')
+      .then(({ data }) => setGcUsers(data ?? []))
+  }, [])
+  useEffect(() => { loadGcAtivacoes() }, [mes, gerente, gcNome, gcUsers])
 
   async function load(forceRefresh = false, refMonth?: string) {
     setIsLoading(true)
@@ -111,6 +129,43 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
     setDailyTpv(points)
   }
 
+  async function loadGcAtivacoes() {
+    // Determina quais GCs (responsible) considerar
+    let responsibleIds: string[] = []
+    if (gcNome) {
+      if (user?.id) responsibleIds = [user.id]
+    } else if (gerente !== 'todos') {
+      responsibleIds = gcUsers.filter(u => u.name === gerenteNome(gerente)).map(u => u.id)
+    } else {
+      responsibleIds = gcUsers.map(u => u.id)
+    }
+    if (responsibleIds.length === 0) { setGcActs([]); setGcActsTpv({}); return }
+
+    const [y, m] = mes.split('-').map(Number)
+    const monthStart = `${mes}-01`
+    const monthEnd   = `${mes}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`
+
+    const { data: acts } = await supabase
+      .from('activations')
+      .select('id,channel,faturamento_mensal,responsible')
+      .eq('gc_ativacao', true)
+      .in('responsible', responsibleIds)
+      .gte('date', monthStart)
+      .lte('date', monthEnd)
+    setGcActs((acts ?? []) as GcActivation[])
+
+    const ids = (acts ?? []).map(a => a.id)
+    if (ids.length === 0) { setGcActsTpv({}); return }
+
+    const { data: tpvRows } = await supabase
+      .from('tpv_cache')
+      .select('ativacao_id,tpv_30_dias')
+      .in('ativacao_id', ids)
+    const map: Record<string, number> = {}
+    tpvRows?.forEach(r => { map[r.ativacao_id as string] = Number(r.tpv_30_dias) })
+    setGcActsTpv(map)
+  }
+
   const refresh = async () => {
     setIsRefresh(true)
     invalidateMbCache()
@@ -137,6 +192,14 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
   const amarelos  = base.filter(c => { const p = getPct(c); return p !== null && p >= 50 && p < 80 }).length
   const vermelhos = base.filter(c => { const p = getPct(c); return p !== null && p < 50 }).length
   const semPrev   = base.filter(c => !c.previsao_faturamento).length
+
+  const gcBreakdown = GC_TIPOS.map(t => {
+    const items = gcActs.filter(a => a.channel === t.key)
+    const tpv = items.reduce((s, a) => s + (gcActsTpv[a.id] ?? 0), 0)
+    return { ...t, count: items.length, tpv }
+  })
+  const gcTotalCount = gcBreakdown.reduce((s, t) => s + t.count, 0)
+  const gcTotalTpv   = gcBreakdown.reduce((s, t) => s + t.tpv, 0)
 
   const donutStatus = [
     { label: '≥ 80%',    value: verdes,    color: COR.verde    },
@@ -278,6 +341,32 @@ export function DashGCContent({ onBack }: { onBack?: () => void } = {}) {
                 </div>
               )
             })}
+          </div>
+        </div>
+
+        {/* Ativações GC do Mês — por tipo */}
+        <div style={{ ...card, padding: '20px', marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Activity size={14} color={COR.azul} />
+              <span style={{ fontWeight: 700, fontSize: 14 }}>Ativações GC do Mês</span>
+            </div>
+            <span style={{ fontSize: 12, color: 'var(--text2)' }}>
+              {gcTotalCount} ativaç{gcTotalCount === 1 ? 'ão' : 'ões'} · {BRL(gcTotalTpv)} TPV gerado
+            </span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+            {gcBreakdown.map(t => (
+              <div key={t.key} style={{ background: 'var(--bg-card2)', borderRadius: 12, padding: '16px' }}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: t.color, textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 10 }}>
+                  {t.label}
+                </div>
+                <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 2 }}>{t.count}</div>
+                <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 10 }}>ativaç{t.count === 1 ? 'ão' : 'ões'}</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: COR.verde }}>{BRL(t.tpv)}</div>
+                <div style={{ fontSize: 11, color: 'var(--text2)' }}>TPV gerado</div>
+              </div>
+            ))}
           </div>
         </div>
 
