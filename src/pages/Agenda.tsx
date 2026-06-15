@@ -41,6 +41,27 @@ function closerColor(name: string): string {
   return GCAL_COLORS[closerColorId(name)] ?? '#7986cb';
 }
 
+// Ícone de status da call — usado nas visões de mês/semana/dia da agenda
+function CallStatusIcon({ status, size = 11 }: { status: string; size?: number }) {
+  switch (status) {
+    case 'Realizada':
+      return <CheckCircle size={size} color="var(--green)" strokeWidth={2.5} />
+    case 'Cancelada':
+      return <XCircle size={size} color="var(--red)" strokeWidth={2.5} />
+    case 'No-show':
+      return <Clock size={size} color="var(--orange)" strokeWidth={2.5} />
+    case 'Em Atendimento':
+      return (
+        <span style={{
+          width: size - 3, height: size - 3, borderRadius: '50%', background: 'var(--cyan)',
+          display: 'inline-block', flexShrink: 0, animation: 'pulse 1.4s ease-in-out infinite',
+        }} />
+      )
+    default:
+      return null
+  }
+}
+
 const DAYS_FULL = ['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];
 const MONTHS_PT = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 
@@ -630,11 +651,15 @@ function AgendaContent() {
                         const cc = closerColor(c.responsible);
                         return (
                           <div key={c.id} onClick={e => { e.stopPropagation(); setSheetCall(c); }} style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 3,
                             fontSize: 10, borderRadius: 4, padding: '2px 4px', marginBottom: 2,
-                            cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                            cursor: 'pointer', overflow: 'hidden',
                             background: `color-mix(in srgb, ${cc} 20%, transparent)`,
                             border: `1px solid ${cc}`, color: cc,
-                          }}>{c.time} {c.title}</div>
+                          }}>
+                            <span style={{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.time} {c.title}</span>
+                            <span style={{ flexShrink: 0 }}><CallStatusIcon status={c.status} size={9} /></span>
+                          </div>
                         );
                       })}
                       {dayCalls.length > 2 && <div style={{ fontSize: 9, color: 'var(--text2)' }}>+{dayCalls.length - 2}</div>}
@@ -672,7 +697,10 @@ function AgendaContent() {
                                 background: `color-mix(in srgb, ${cc} 18%, transparent)`,
                                 border: `1px solid ${cc}`,
                               }}>
-                                <div style={{ fontSize: 10, color: cc, fontWeight: 700 }}>{c.time}</div>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
+                                  <div style={{ fontSize: 10, color: cc, fontWeight: 700 }}>{c.time}</div>
+                                  <CallStatusIcon status={c.status} size={10} />
+                                </div>
                                 <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)', lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</div>
                                 {c.meet_link && <Video size={9} color={cc} />}
                               </div>
@@ -737,8 +765,11 @@ function AgendaContent() {
                             background: `color-mix(in srgb, ${cc} 20%, var(--bg-card))`,
                             border: `1.5px solid ${cc}`,
                           }}>
-                          <div style={{ fontSize: 11, color: cc, fontWeight: 700, marginBottom: 2 }}>
-                            {c.time}{c.endTime ? ` – ${c.endTime}` : ''}
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginBottom: 2 }}>
+                            <div style={{ fontSize: 11, color: cc, fontWeight: 700 }}>
+                              {c.time}{c.endTime ? ` – ${c.endTime}` : ''}
+                            </div>
+                            <CallStatusIcon status={c.status} size={12} />
                           </div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</div>
                           <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.responsible}</div>
