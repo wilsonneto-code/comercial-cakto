@@ -103,7 +103,7 @@ function buildEvent(input: {
   closerName?: string | null; closerEmail?: string | null
   clientEmail?: string | null; notes?: string | null
 }) {
-  const { title, date, closerName, closerEmail, clientEmail, notes } = input
+  const { title, date, closerName, closerEmail, clientEmail } = input
   const tz      = '-03:00'
   const timeStr = (input.time || '09:00').slice(0, 5)
 
@@ -123,7 +123,6 @@ function buildEvent(input: {
   const descLines = [
     `Closer: ${closerName ?? ''}${closerEmail ? ` <${closerEmail}>` : ''}`,
     clientEmail ? `Cliente: ${clientEmail}` : '',
-    notes ? `\n${notes}` : '',
   ].filter(Boolean).join('\n')
 
   // Convidados: admin + closer (se diferente do admin) + cliente(s) válidos
